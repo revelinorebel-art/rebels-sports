@@ -6,49 +6,97 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import RegistrationModal from '@/components/RegistrationModal';
 import { sendRegistrationEmail, sendOwnerNotification } from '@/services/emailService';
+import apiService from '@/services/apiService';
 
 const GroepslessenPage = () => {
   const [classes, setClasses] = useState([]);
+  const [reservations, setReservations] = useState({});
   const [selectedDay, setSelectedDay] = useState('maandag');
   const [currentWeek, setCurrentWeek] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedClass, setSelectedClass] = useState(null);
   const { toast } = useToast();
 
-  // Laad lessen uit localStorage
-  useEffect(() => {
-    const loadClasses = () => {
+  // Functie om reserveringen te laden
+  const loadReservations = async () => {
+    try {
+      const response = await apiService.getReservations();
+      if (response.success) {
+        // Groepeer reserveringen per les en datum
+        const reservationCounts = {};
+        response.data.forEach(reservation => {
+          const key = `${reservation.lesson_id}-${reservation.lesson_date}`;
+          reservationCounts[key] = (reservationCounts[key] || 0) + 1;
+        });
+        setReservations(reservationCounts);
+      }
+    } catch (error) {
+      console.error("Failed to load reservations:", error);
+      // Fallback naar localStorage
       try {
-        const storedClasses = localStorage.getItem('rebelsClasses');
-        if (storedClasses) {
-          setClasses(JSON.parse(storedClasses));
+        const storedReservations = localStorage.getItem('rebelsReservations');
+        if (storedReservations) {
+          const parsed = JSON.parse(storedReservations);
+          const counts = {};
+          Object.keys(parsed).forEach(key => {
+            counts[key] = parsed[key].reservedSpots || 0;
+          });
+          setReservations(counts);
+        }
+      } catch (localError) {
+        console.error("Failed to parse reservations from localStorage", localError);
+      }
+    }
+  };
+
+  // Laad lessen uit database
+  useEffect(() => {
+    const loadClasses = async () => {
+      try {
+        const response = await apiService.getLessons();
+        if (response.success) {
+          // Converteer database format naar frontend format
+          const formattedClasses = response.data.map(lesson => 
+            apiService.formatLessonForFrontend(lesson)
+          );
+          setClasses(formattedClasses);
         } else {
-          // Geen lessen gevonden - laat admin lessen toevoegen
+          console.error("Failed to load classes:", response.error);
           setClasses([]);
         }
       } catch (error) {
-        console.error("Failed to parse classes from localStorage", error);
-        setClasses([]);
+        console.error("Failed to load classes from database:", error);
+        // Fallback naar localStorage voor backwards compatibility
+        try {
+          const storedClasses = localStorage.getItem('rebelsClasses');
+          if (storedClasses) {
+            setClasses(JSON.parse(storedClasses));
+            toast({
+              title: "Offline modus",
+              description: "Lessen geladen uit lokale opslag. Database verbinding mislukt.",
+              variant: "destructive"
+            });
+          } else {
+            setClasses([]);
+          }
+        } catch (localError) {
+          console.error("Failed to parse classes from localStorage", localError);
+          setClasses([]);
+        }
       }
     };
 
-    loadClasses();
-
-    // Luister naar localStorage wijzigingen
-    const handleStorageChange = () => {
-      loadClasses();
+    const loadData = async () => {
+      await loadClasses();
+      await loadReservations();
     };
 
-    window.addEventListener('storage', handleStorageChange);
+    loadData();
     
     // Stel de huidige dag in als standaard
     const today = new Date();
     const dayOfWeek = today.getDay();
     setSelectedDay(dayOfWeek === 0 ? 7 : dayOfWeek);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-    };
   }, []);
 
   // Dagen van de week
@@ -91,21 +139,23 @@ const GroepslessenPage = () => {
     // Filter lessen op basis van geselecteerde dag van de week
     const dayClasses = classes.filter(cls => cls.day === selectedDay);
     
-    // Haal bestaande reserveringen op
-    const reservations = JSON.parse(localStorage.getItem('rebelsReservations') || '{}');
-    
     // Genereer unieke lessen voor deze specifieke datum
     return dayClasses.map(cls => {
       const dateSpecificId = `${cls.id}-${selectedDate.toISOString().split('T')[0]}`;
-      const reservedSpots = reservations[dateSpecificId]?.reservedSpots || 0;
+      const dateString = selectedDate.toISOString().split('T')[0];
+      
+      // Bereken beschikbare plekken op basis van reserveringen
+      const reservedSpots = reservations[dateSpecificId] || 0;
       const availableSpots = Math.max(0, cls.spots - reservedSpots);
       
       return {
         ...cls,
         id: dateSpecificId, // Unieke ID per datum
         originalId: cls.id, // Bewaar originele ID
-        date: selectedDate.toISOString().split('T')[0], // Voeg datum toe
+        date: dateString, // Voeg datum toe
         spots: availableSpots, // Aangepaste beschikbare plekken
+        totalSpots: cls.spots, // Bewaar originele aantal plekken
+        reservedSpots: reservedSpots, // Aantal gereserveerde plekken
         displayDate: selectedDate.toLocaleDateString('nl-NL', { 
           weekday: 'long', 
           year: 'numeric', 
@@ -134,45 +184,54 @@ const GroepslessenPage = () => {
   // Functie om inschrijving te verwerken
   const handleRegistration = async (registrationData) => {
     try {
-      // Sla inschrijving op in localStorage
-      const registrationsKey = 'rebelsRegistrations';
-      const existingRegistrations = JSON.parse(localStorage.getItem(registrationsKey) || '[]');
+      // Converteer registratie data naar database format
+      const reservationData = apiService.formatReservationForDatabase(registrationData);
       
-      const newRegistration = {
-        id: Date.now().toString(),
-        ...registrationData,
-        registeredAt: new Date().toISOString()
-      };
+      // Sla reservering op in database
+      const response = await apiService.createReservation(reservationData);
       
-      existingRegistrations.push(newRegistration);
-      localStorage.setItem(registrationsKey, JSON.stringify(existingRegistrations));
+      if (response.success) {
+        // Verstuur email notificatie
+        await sendEmailNotification(registrationData);
 
-      // Update reserveringen voor backwards compatibility
-      const reservationKey = 'rebelsReservations';
-      const existingReservations = JSON.parse(localStorage.getItem(reservationKey) || '{}');
-      
-      if (!existingReservations[registrationData.classId]) {
-        existingReservations[registrationData.classId] = {
-          originalClassId: registrationData.classId,
-          reservedSpots: 1,
-          date: registrationData.classDate
-        };
+        toast({
+          title: "Inschrijving bevestigd!",
+          description: `Hallo ${registrationData.name}, je bent ingeschreven voor ${registrationData.className}. Check je email voor de bevestiging.`,
+        });
+
+        // Herlaad reserveringen om bijgewerkte beschikbare plekken te tonen
+         await loadReservations();
       } else {
-        existingReservations[registrationData.classId].reservedSpots += 1;
+        throw new Error(response.error || 'Reservering mislukt');
       }
-      
-      localStorage.setItem(reservationKey, JSON.stringify(existingReservations));
-
-      // Verstuur email notificatie (simulatie)
-      await sendEmailNotification(registrationData);
-
-      toast({
-        title: "Inschrijving bevestigd!",
-        description: `Hallo ${registrationData.name}, je bent ingeschreven voor ${registrationData.className}. Check je email voor de bevestiging.`,
-      });
     } catch (error) {
       console.error('Error processing registration:', error);
-      throw error;
+      
+      // Fallback naar localStorage voor backwards compatibility
+      try {
+        const registrationsKey = 'rebelsRegistrations';
+        const existingRegistrations = JSON.parse(localStorage.getItem(registrationsKey) || '[]');
+        
+        const newRegistration = {
+          id: Date.now().toString(),
+          ...registrationData,
+          registeredAt: new Date().toISOString()
+        };
+        
+        existingRegistrations.push(newRegistration);
+        localStorage.setItem(registrationsKey, JSON.stringify(existingRegistrations));
+
+        await sendEmailNotification(registrationData);
+
+        toast({
+          title: "Inschrijving bevestigd (offline)!",
+          description: `Hallo ${registrationData.name}, je inschrijving is lokaal opgeslagen. Database verbinding mislukt.`,
+          variant: "destructive"
+        });
+      } catch (fallbackError) {
+        console.error('Fallback registration failed:', fallbackError);
+        throw error;
+      }
     }
   };
 

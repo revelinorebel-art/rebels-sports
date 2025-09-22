@@ -4,19 +4,50 @@
  * Voor Hostinger deployment
  */
 
-// Database configuratie - PAS DEZE AAN VOOR HOSTINGER
-$host = 'localhost'; // Meestal localhost bij Hostinger
-$dbname = 'u123456789_rebels'; // Je database naam bij Hostinger
-$username = 'u123456789_user'; // Je database gebruiker
-$password = 'JouwSterkWachtwoord123!'; // Je database wachtwoord
+// Load environment variables from .env file
+function loadEnv($path) {
+    if (!file_exists($path)) {
+        return;
+    }
+    
+    $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        if (strpos(trim($line), '#') === 0) {
+            continue;
+        }
+        
+        list($name, $value) = explode('=', $line, 2);
+        $name = trim($name);
+        $value = trim($value);
+        
+        if (!array_key_exists($name, $_ENV)) {
+            $_ENV[$name] = $value;
+        }
+    }
+}
+
+// Load .env file from parent directory
+loadEnv(__DIR__ . '/../.env');
+
+// Database configuratie - Gebruikt environment variables
+$host = $_ENV['DB_HOST'] ?? 'localhost';
+$dbname = $_ENV['DB_NAME'] ?? 'u123456789_rebels';
+$username = $_ENV['DB_USERNAME'] ?? 'u123456789_user';
+$password = $_ENV['DB_PASSWORD'] ?? 'JouwSterkWachtwoord123!';
+$port = $_ENV['DB_PORT'] ?? '3306';
 
 try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    $dsn = "mysql:host=$host;port=$port;dbname=$dbname;charset=utf8mb4";
+    $pdo = new PDO($dsn, $username, $password, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+        PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci"
+    ]);
 } catch(PDOException $e) {
     http_response_code(500);
-    die(json_encode(['error' => 'Database connectie mislukt', 'details' => $e->getMessage()]));
+    $error_message = ($_ENV['NODE_ENV'] ?? 'production') === 'development' ? $e->getMessage() : 'Database connectie mislukt';
+    die(json_encode(['error' => 'Database connectie mislukt', 'details' => $error_message]));
 }
 
 // CORS headers voor frontend

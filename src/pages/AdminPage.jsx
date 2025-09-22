@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { v4 as uuidv4 } from 'uuid';
+import apiService from '@/services/apiService';
 
 const AdminPage = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -89,36 +90,52 @@ const AdminPage = () => {
     setIsLoading(false);
   }, []);
   
-  // Laad lessen uit localStorage
+  // Laad lessen uit database
   useEffect(() => {
-    const loadClasses = () => {
+    const loadClasses = async () => {
       try {
-        const storedClasses = localStorage.getItem('rebelsClasses');
-        if (storedClasses) {
-          setClasses(JSON.parse(storedClasses));
+        const response = await apiService.getLessons();
+        if (response.success) {
+          const formattedClasses = response.data.map(lesson => 
+            apiService.formatLessonForFrontend(lesson)
+          );
+          setClasses(formattedClasses);
+        } else {
+          console.error("Failed to load classes:", response.error);
+          // Fallback naar localStorage
+          const storedClasses = localStorage.getItem('rebelsClasses');
+          if (storedClasses) {
+            setClasses(JSON.parse(storedClasses));
+            toast({
+              title: "Offline modus",
+              description: "Lessen geladen uit lokale opslag. Database verbinding mislukt.",
+              variant: "destructive"
+            });
+          }
         }
         setClassesLoaded(true);
       } catch (error) {
-        console.error("Failed to parse classes from localStorage", error);
-        setClasses([]);
+        console.error("Failed to load classes from database:", error);
+        // Fallback naar localStorage
+        try {
+          const storedClasses = localStorage.getItem('rebelsClasses');
+          if (storedClasses) {
+            setClasses(JSON.parse(storedClasses));
+            toast({
+              title: "Offline modus",
+              description: "Lessen geladen uit lokale opslag. Database verbinding mislukt.",
+              variant: "destructive"
+            });
+          }
+        } catch (localError) {
+          console.error("Failed to parse classes from localStorage", localError);
+          setClasses([]);
+        }
         setClassesLoaded(true);
       }
     };
 
     loadClasses();
-
-    // Luister naar localStorage wijzigingen van andere pagina's
-    const handleStorageChange = (e) => {
-      if (e.key === 'rebelsClasses') {
-        loadClasses();
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-    };
   }, []);
   
   // Update localStorage wanneer lessen veranderen (alleen na initiële load)
@@ -128,34 +145,61 @@ const AdminPage = () => {
     }
   }, [classes, classesLoaded]);
 
-  // Laad inschrijvingen uit localStorage
+  // Laad inschrijvingen uit database
   useEffect(() => {
-    const loadRegistrations = () => {
+    const loadRegistrations = async () => {
       try {
-        const storedRegistrations = localStorage.getItem('rebelsRegistrations');
-        if (storedRegistrations) {
-          setRegistrations(JSON.parse(storedRegistrations));
+        const response = await apiService.getReservations();
+        if (response.success) {
+          // Converteer database reserveringen naar frontend formaat
+          const formattedRegistrations = response.data.map(reservation => ({
+            id: reservation.id,
+            name: reservation.participant_name,
+            email: reservation.participant_email,
+            phone: reservation.participant_phone || '',
+            classId: `${reservation.lesson_id}-${reservation.lesson_date}`,
+            className: reservation.lesson_title,
+            classDate: reservation.lesson_date,
+            classTime: reservation.lesson_time,
+            trainer: reservation.lesson_trainer,
+            registeredAt: reservation.created_at,
+            notes: reservation.notes || ''
+          }));
+          setRegistrations(formattedRegistrations);
+        } else {
+          console.error("Failed to load registrations:", response.error);
+          // Fallback naar localStorage
+          const storedRegistrations = localStorage.getItem('rebelsRegistrations');
+          if (storedRegistrations) {
+            setRegistrations(JSON.parse(storedRegistrations));
+            toast({
+              title: "Offline modus",
+              description: "Inschrijvingen geladen uit lokale opslag. Database verbinding mislukt.",
+              variant: "destructive"
+            });
+          }
         }
       } catch (error) {
-        console.error("Failed to parse registrations from localStorage", error);
-        setRegistrations([]);
+        console.error("Failed to load registrations from database:", error);
+        // Fallback naar localStorage
+        try {
+          const storedRegistrations = localStorage.getItem('rebelsRegistrations');
+          if (storedRegistrations) {
+            setRegistrations(JSON.parse(storedRegistrations));
+            toast({
+              title: "Offline modus",
+              description: "Inschrijvingen geladen uit lokale opslag. Database verbinding mislukt.",
+              variant: "destructive"
+            });
+          }
+        } catch (localError) {
+          console.error("Failed to parse registrations from localStorage", localError);
+          setRegistrations([]);
+        }
       }
     };
 
     loadRegistrations();
-
-    // Luister naar localStorage wijzigingen van andere pagina's
-    const handleStorageChange = (e) => {
-      if (e.key === 'rebelsRegistrations') {
-        loadRegistrations();
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-    };
   }, []);
 
   const handleLogin = (e) => {
@@ -206,7 +250,7 @@ const AdminPage = () => {
     setFormData(updatedFormData);
   };
   
-  const handleAddClass = (e) => {
+  const handleAddClass = async (e) => {
     e.preventDefault();
     
     if (!formData.title || !formData.date || !formData.time || !formData.spots) {
@@ -218,27 +262,69 @@ const AdminPage = () => {
        return;
      }
     
-    const newClass = {
-      ...formData,
-      id: formData.id || uuidv4()
-    };
+    const lessonData = apiService.formatLessonForDatabase(formData);
     
-    if (formData.id) {
-      const updatedClasses = classes.map(cls => cls.id === formData.id ? newClass : cls);
-      setClasses(updatedClasses);
-      localStorage.setItem('rebelsClasses', JSON.stringify(updatedClasses));
-      toast({
-        title: "Les bijgewerkt",
-        description: `De les "${newClass.title}" is succesvol bijgewerkt.`
-      });
-    } else {
-      const updatedClasses = [...classes, newClass];
-      setClasses(updatedClasses);
-      localStorage.setItem('rebelsClasses', JSON.stringify(updatedClasses));
-      toast({
-        title: "Les toegevoegd",
-        description: `De les "${newClass.title}" is succesvol toegevoegd aan het rooster.`
-      });
+    try {
+      let response;
+      if (formData.id) {
+        // Update bestaande les
+        response = await apiService.updateLesson(formData.id, lessonData);
+        if (response.success) {
+          const updatedClasses = classes.map(cls => cls.id === formData.id ? formData : cls);
+          setClasses(updatedClasses);
+          toast({
+            title: "Les bijgewerkt",
+            description: `De les "${formData.title}" is succesvol bijgewerkt.`
+          });
+        } else {
+          throw new Error(response.error);
+        }
+      } else {
+        // Nieuwe les toevoegen
+        response = await apiService.createLesson(lessonData);
+        if (response.success) {
+          const newClass = {
+            ...formData,
+            id: response.data.id || uuidv4()
+          };
+          const updatedClasses = [...classes, newClass];
+          setClasses(updatedClasses);
+          toast({
+            title: "Les toegevoegd",
+            description: `De les "${formData.title}" is succesvol toegevoegd aan het rooster.`
+          });
+        } else {
+          throw new Error(response.error);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to save lesson to database:", error);
+      
+      // Fallback naar localStorage
+      const newClass = {
+        ...formData,
+        id: formData.id || uuidv4()
+      };
+      
+      if (formData.id) {
+        const updatedClasses = classes.map(cls => cls.id === formData.id ? newClass : cls);
+        setClasses(updatedClasses);
+        localStorage.setItem('rebelsClasses', JSON.stringify(updatedClasses));
+        toast({
+          title: "Les bijgewerkt (offline)",
+          description: `De les "${newClass.title}" is lokaal opgeslagen. Database verbinding mislukt.`,
+          variant: "destructive"
+        });
+      } else {
+        const updatedClasses = [...classes, newClass];
+        setClasses(updatedClasses);
+        localStorage.setItem('rebelsClasses', JSON.stringify(updatedClasses));
+        toast({
+          title: "Les toegevoegd (offline)",
+          description: `De les "${newClass.title}" is lokaal opgeslagen. Database verbinding mislukt.`,
+          variant: "destructive"
+        });
+      }
     }
     
     setFormData({
@@ -258,16 +344,36 @@ const AdminPage = () => {
     setActiveTab('add');
   };
   
-  const handleDeleteClass = (id) => {
-    setClasses(prevClasses => {
-      const updatedClasses = prevClasses.filter(c => c.id !== id);
-      localStorage.setItem('rebelsClasses', JSON.stringify(updatedClasses));
-      toast({
-        title: "Succes",
-        description: "Les succesvol verwijderd"
+  const handleDeleteClass = async (id) => {
+    try {
+      const response = await apiService.deleteLesson(id);
+      if (response.success) {
+        setClasses(prevClasses => {
+          const updatedClasses = prevClasses.filter(c => c.id !== id);
+          toast({
+            title: "Succes",
+            description: "Les succesvol verwijderd"
+          });
+          return updatedClasses;
+        });
+      } else {
+        throw new Error(response.error);
+      }
+    } catch (error) {
+      console.error("Failed to delete lesson from database:", error);
+      
+      // Fallback naar localStorage
+      setClasses(prevClasses => {
+        const updatedClasses = prevClasses.filter(c => c.id !== id);
+        localStorage.setItem('rebelsClasses', JSON.stringify(updatedClasses));
+        toast({
+          title: "Les verwijderd (offline)",
+          description: "Les lokaal verwijderd. Database verbinding mislukt.",
+          variant: "destructive"
+        });
+        return updatedClasses;
       });
-      return updatedClasses;
-    });
+    }
   };
   
   if (!isAuthenticated && !isLoading) {
