@@ -19,7 +19,8 @@ const Header = () => {
     { to: "/", text: "Home" },
     { to: "/diensten", text: "Diensten" },
     { to: "/groepslessen", text: "Groepslessen" },
-    { to: "/lidmaatschappen", text: "Lidmaatschappen" },
+    { to: "/trainers", text: "Trainers" },
+    { to: "/prijzen", text: "Prijzen" },
     { to: "/over-ons", text: "Over Ons" },
     { to: "/contact", text: "Contact" },
   ];

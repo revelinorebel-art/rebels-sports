@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { X, User, Mail, Calendar, Clock, Users } from 'lucide-react';
+import { X, User, Mail, Phone, Calendar, Clock, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const RegistrationModal = ({ isOpen, onClose, classInfo, onSubmit }) => {
   const [formData, setFormData] = useState({
     name: '',
-    email: ''
+    email: '',
+    phone: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -20,13 +21,18 @@ const RegistrationModal = ({ isOpen, onClose, classInfo, onSubmit }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!formData.name.trim() || !formData.email.trim()) {
+    if (!formData.name.trim() || !formData.email.trim() || !formData.phone.trim()) {
       alert('Vul alle velden in');
       return;
     }
 
     if (!formData.email.includes('@')) {
       alert('Voer een geldig email adres in');
+      return;
+    }
+
+    if (formData.phone.trim().length < 10) {
+      alert('Voer een geldig telefoonnummer in (minimaal 10 cijfers)');
       return;
     }
 
@@ -43,7 +49,7 @@ const RegistrationModal = ({ isOpen, onClose, classInfo, onSubmit }) => {
       });
       
       // Reset form
-      setFormData({ name: '', email: '' });
+      setFormData({ name: '', email: '', phone: '' });
       onClose();
     } catch (error) {
       console.error('Error submitting registration:', error);
@@ -128,6 +134,25 @@ const RegistrationModal = ({ isOpen, onClose, classInfo, onSubmit }) => {
                   onChange={handleInputChange}
                   className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent text-gray-900"
                   placeholder="voornaam@email.com"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">
+                Telefoonnummer *
+              </label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  type="tel"
+                  id="phone"
+                  name="phone"
+                  value={formData.phone}
+                  onChange={handleInputChange}
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent text-gray-900"
+                  placeholder="06 12345678"
                   required
                 />
               </div>

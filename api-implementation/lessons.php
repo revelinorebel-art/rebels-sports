@@ -34,7 +34,7 @@ function handleGetLessons() {
     global $pdo;
     
     try {
-        // Haal alle lessen op, gesorteerd op dag en tijd
+        // Haal alle lessen op, gesorteerd op datum en tijd
         $stmt = $pdo->query("
             SELECT 
                 id,
@@ -48,7 +48,7 @@ function handleGetLessons() {
                 created_at,
                 updated_at
             FROM lessons 
-            ORDER BY day_of_week, time
+            ORDER BY specific_date, time
         ");
         
         $lessons = $stmt->fetchAll();
@@ -56,7 +56,7 @@ function handleGetLessons() {
         // Converteer time format voor frontend compatibiliteit
         foreach ($lessons as &$lesson) {
             $lesson['time'] = substr($lesson['time'], 0, 5); // HH:MM format
-            $lesson['day'] = (int)$lesson['day']; // Zorg voor integer
+            $lesson['day'] = $lesson['day'] !== null ? (int)$lesson['day'] : null; // Zorg voor integer of null
             $lesson['spots'] = (int)$lesson['spots'];
         }
         
@@ -70,28 +70,31 @@ function handleGetLessons() {
 function handleCreateLesson($data) {
     global $pdo;
     
-    // Valideer input
-    validateInput($data, ['id', 'title', 'time', 'trainer', 'spots', 'day']);
+    // Valideer input (day is nu optioneel - alleen admin kan specifieke datum instellen)
+    validateInput($data, ['title', 'time', 'trainer', 'spots']);
     
     try {
+        // Genereer een unieke UUID voor de les
+        $lessonId = generateUUID();
+        
         $stmt = $pdo->prepare("
             INSERT INTO lessons (id, title, time, trainer, spots, day_of_week, specific_date, description) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ");
         
         $result = $stmt->execute([
-            sanitizeInput($data['id']),
+            $lessonId,
             sanitizeInput($data['title']),
             $data['time'],
             sanitizeInput($data['trainer']),
             (int)$data['spots'],
-            (int)$data['day'],
+            isset($data['day']) ? (int)$data['day'] : null,
             isset($data['date']) && !empty($data['date']) ? $data['date'] : null,
             isset($data['description']) ? sanitizeInput($data['description']) : ''
         ]);
         
         if ($result) {
-            sendResponse(['success' => true, 'id' => $data['id'], 'message' => 'Les succesvol toegevoegd']);
+            sendResponse(['success' => true, 'id' => $lessonId, 'message' => 'Les succesvol toegevoegd']);
         } else {
             sendError('Fout bij toevoegen les', 500);
         }
@@ -108,8 +111,8 @@ function handleCreateLesson($data) {
 function handleUpdateLesson($data) {
     global $pdo;
     
-    // Valideer input
-    validateInput($data, ['id', 'title', 'time', 'trainer', 'spots', 'day']);
+    // Valideer input (day is optioneel)
+    validateInput($data, ['id', 'title', 'time', 'trainer', 'spots']);
     
     try {
         $stmt = $pdo->prepare("
@@ -123,7 +126,7 @@ function handleUpdateLesson($data) {
             $data['time'],
             sanitizeInput($data['trainer']),
             (int)$data['spots'],
-            (int)$data['day'],
+            isset($data['day']) ? (int)$data['day'] : null,
             isset($data['date']) && !empty($data['date']) ? $data['date'] : null,
             isset($data['description']) ? sanitizeInput($data['description']) : '',
             sanitizeInput($data['id'])

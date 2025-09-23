@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 const Footer = () => {
   const quickLinks = [
     { text: 'Over Ons', path: '/over-ons' },
-    { text: 'Lidmaatschappen', path: '/lidmaatschappen' },
+    { text: 'Prijzen', path: '/prijzen' },
     { text: 'Contact Us', path: '/contact' },
   ];
 

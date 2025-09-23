@@ -17,18 +17,31 @@ const EditClassModal = ({ isOpen, setIsOpen, classData, onSave, selectedDay }) =
     image: 'Een generieke fitness les'
   });
 
+  // Dagen van de week in het formaat dat de database verwacht
+  // In de database: 0 = Zondag, 1 = Maandag, etc.
+  const dayNames = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
+
   useEffect(() => {
     if (classData) {
+      // Als we een bestaande les bewerken
       setFormData(classData);
     } else {
+      // Als we een nieuwe les toevoegen
+      const today = new Date();
+      const formattedDate = today.toISOString().split('T')[0];
+      
+      // Bepaal de dag van de week (0 = Zondag, 1 = Maandag, etc.)
+      const dayOfWeek = today.getDay(); // JavaScript: 0 = Zondag, 1 = Maandag, etc.
+      
       setFormData({
         id: null,
         name: '',
         time: '',
         trainer: '',
         spots: 15,
-        day: selectedDay,
-        date: '',
+        // Gebruik de geselecteerde dag als die is meegegeven, anders de huidige dag
+        day: selectedDay !== undefined ? selectedDay : dayOfWeek,
+        date: formattedDate,
         image: 'Een nieuwe fitness les'
       });
     }
@@ -36,20 +49,44 @@ const EditClassModal = ({ isOpen, setIsOpen, classData, onSave, selectedDay }) =
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: name === 'spots' ? Number(value) : value }));
+    
+    // Als het datumveld wordt gewijzigd, update ook de dag van de week
+    if (name === 'date' && value) {
+      const selectedDate = new Date(value);
+      // JavaScript: 0 = Zondag, 1 = Maandag, etc.
+      const dayOfWeek = selectedDate.getDay();
+      
+      console.log(`Geselecteerde datum: ${value}, berekende dag: ${dayOfWeek} (${dayNames[dayOfWeek]})`);
+      
+      setFormData(prev => ({ 
+        ...prev, 
+        [name]: value,
+        day: dayOfWeek // Sla de dag op in het formaat dat de database verwacht
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: name === 'spots' ? Number(value) : value }));
+    }
   };
 
+  // Als de dag handmatig wordt gewijzigd via de dropdown
   const handleSelectChange = (name, value) => {
-    setFormData(prev => ({ ...prev, [name]: value }));
+    const numericValue = Number(value);
+    console.log(`Dag handmatig gewijzigd naar: ${numericValue} (${dayNames[numericValue]})`);
+    setFormData(prev => ({ ...prev, [name]: numericValue }));
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    
+    // Log de gegevens voordat we ze opslaan
+    console.log("Les opslaan met de volgende gegevens:", {
+      ...formData,
+      dayName: dayNames[formData.day]
+    });
+    
     onSave(formData);
     setIsOpen(false);
   };
-
-  const dayNames = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -79,19 +116,6 @@ const EditClassModal = ({ isOpen, setIsOpen, classData, onSave, selectedDay }) =
               <Input id="spots" name="spots" type="number" value={formData.spots} onChange={handleChange} className="col-span-3 bg-slate-700 border-slate-600" />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="day" className="text-right">Dag</Label>
-                <Select onValueChange={(value) => handleSelectChange('day', Number(value))} value={String(formData.day)}>
-                    <SelectTrigger className="col-span-3 bg-slate-700 border-slate-600">
-                        <SelectValue placeholder="Kies een dag" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-slate-800 text-white border-slate-700">
-                        {dayNames.map((day, index) => (
-                            <SelectItem key={index} value={String(index)}>{day}</SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="date" className="text-right">Datum</Label>
               <Input 
                 id="date" 
@@ -102,6 +126,30 @@ const EditClassModal = ({ isOpen, setIsOpen, classData, onSave, selectedDay }) =
                 className="col-span-3 bg-slate-700 border-slate-600 text-white" 
               />
             </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="day" className="text-right">Dag</Label>
+                <Select 
+                  onValueChange={(value) => handleSelectChange('day', value)} 
+                  value={String(formData.day)}
+                  disabled={formData.date ? true : false} // Uitgeschakeld als er een datum is geselecteerd
+                >
+                    <SelectTrigger className="col-span-3 bg-slate-700 border-slate-600">
+                        <SelectValue placeholder="Kies een dag">
+                          {formData.day !== undefined && formData.day !== null ? dayNames[formData.day] : "Kies een dag"}
+                        </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent className="bg-slate-800 text-white border-slate-700">
+                        {dayNames.map((day, index) => (
+                            <SelectItem key={index} value={String(index)}>{day}</SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+            </div>
+            {formData.date && (
+              <div className="text-sm text-orange-400 mt-2">
+                Datum geselecteerd: {formData.date} ({dayNames[formData.day]})
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button type="submit" className="bg-orange-500 hover:bg-orange-600">Opslaan</Button>

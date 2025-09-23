@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ShieldCheck, LogOut, Calendar, Plus, Edit, Trash2, Clock, Users, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ShieldCheck, LogOut, Calendar, Plus, Edit, Trash2, Clock, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,83 +11,86 @@ import apiService from '@/services/apiService';
 const AdminPage = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [loginData, setLoginData] = useState({
+    username: '',
+    password: ''
+  });
   const [classes, setClasses] = useState([]);
   const [classesLoaded, setClassesLoaded] = useState(false);
   const [registrations, setRegistrations] = useState([]);
   const [activeTab, setActiveTab] = useState('classes');
-  const [selectedDay, setSelectedDay] = useState(1);
-  const [currentWeek, setCurrentWeek] = useState(new Date());
+  const [editingClass, setEditingClass] = useState(null);
   const [formData, setFormData] = useState({
-    id: null,
     title: '',
     time: '',
     trainer: '',
     spots: 15,
-    day: 1, // Wordt automatisch berekend op basis van datum
-    date: new Date().toISOString().split('T')[0], // Vandaag als standaard
-    description: 'Een nieuwe fitness les'
+    date: new Date().toISOString().split('T')[0],
+    description: ''
   });
   const { toast } = useToast();
 
-  // Helper functies voor weeknavigatie
-  const getWeekStart = (date) => {
-    const d = new Date(date);
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Maandag als start van de week
-    return new Date(d.setDate(diff));
-  };
-
-  const getWeekEnd = (date) => {
-    const weekStart = getWeekStart(date);
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 6);
-    return weekEnd;
-  };
-
-  const formatWeekRange = (date) => {
-    const start = getWeekStart(date);
-    const end = getWeekEnd(date);
-    return `${start.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' })} - ${end.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })}`;
-  };
-
-  const isDateInCurrentWeek = (dateString) => {
-    if (!dateString) return false;
-    
-    // Parse the date string properly to avoid timezone issues
-    const dateParts = dateString.split('-');
-    const date = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-    
-    const weekStart = getWeekStart(currentWeek);
-    const weekEnd = getWeekEnd(currentWeek);
-    
-    // Set time to start of day for proper comparison
-    weekStart.setHours(0, 0, 0, 0);
-    weekEnd.setHours(23, 59, 59, 999);
-    date.setHours(0, 0, 0, 0);
-    
-    return date >= weekStart && date <= weekEnd;
-  };
-
-  const navigateWeek = (direction) => {
-    const newWeek = new Date(currentWeek);
-    newWeek.setDate(currentWeek.getDate() + (direction * 7));
-    setCurrentWeek(newWeek);
-  };
-
   // Functie om beschikbare plekken te berekenen
   const getAvailableSpots = (classId, totalSpots) => {
-    const classRegistrations = registrations.filter(reg => reg.classId === classId);
+    const classRegistrations = registrations.filter(reg => 
+      (reg.lesson_id || reg.classId) === classId
+    );
     const reservedSpots = classRegistrations.length;
     return Math.max(0, totalSpots - reservedSpots);
   };
 
+  // Functie om les informatie op te halen voor een reservering
+  const getClassInfoForRegistration = (registration) => {
+    // Zoek op basis van lesson_id (database format) of classId (legacy format)
+    const lessonId = registration.lesson_id || registration.classId;
+    const classInfo = classes.find(cls => cls.id == lessonId);
+    return classInfo || {};
+  };
+
+  // Functie om een inschrijving te verwijderen
+  const handleDeleteRegistration = async (registrationId) => {
+    if (!confirm('Weet je zeker dat je deze inschrijving wilt verwijderen?')) {
+      return;
+    }
+
+    try {
+      const response = await apiService.deleteReservation(registrationId);
+      
+      if (response.success) {
+        // Update lokale state
+        setRegistrations(prev => prev.filter(reg => reg.id !== registrationId));
+        
+        toast({
+          title: "Inschrijving verwijderd",
+          description: "De inschrijving is succesvol verwijderd en de plek is weer beschikbaar.",
+        });
+      } else {
+        throw new Error(response.error || 'Verwijderen mislukt');
+      }
+    } catch (error) {
+      console.error('Error deleting registration:', error);
+      toast({
+        title: "Fout bij verwijderen",
+        description: "Er is een fout opgetreden bij het verwijderen van de inschrijving.",
+        variant: "destructive"
+      });
+    }
+  };
+
   // Controleer bij het laden van de pagina of de gebruiker is ingelogd
   useEffect(() => {
-    const authStatus = localStorage.getItem('adminAuthenticated');
-    setIsAuthenticated(authStatus === 'true');
-    setIsLoading(false);
+    const checkAuth = async () => {
+      try {
+        const response = await apiService.checkAdminAuth();
+        setIsAuthenticated(response.success);
+      } catch (error) {
+        console.error("Auth check failed:", error);
+        setIsAuthenticated(false);
+      }
+      setIsLoading(false);
+    };
+    
+    checkAuth();
   }, []);
   
   // Laad lessen uit database
@@ -102,48 +105,30 @@ const AdminPage = () => {
           setClasses(formattedClasses);
         } else {
           console.error("Failed to load classes:", response.error);
-          // Fallback naar localStorage
-          const storedClasses = localStorage.getItem('rebelsClasses');
-          if (storedClasses) {
-            setClasses(JSON.parse(storedClasses));
-            toast({
-              title: "Offline modus",
-              description: "Lessen geladen uit lokale opslag. Database verbinding mislukt.",
-              variant: "destructive"
-            });
-          }
+          toast({
+            title: "Database fout",
+            description: "Kan lessen niet laden uit database. Controleer de verbinding.",
+            variant: "destructive"
+          });
+          setClasses([]);
         }
         setClassesLoaded(true);
       } catch (error) {
         console.error("Failed to load classes from database:", error);
-        // Fallback naar localStorage
-        try {
-          const storedClasses = localStorage.getItem('rebelsClasses');
-          if (storedClasses) {
-            setClasses(JSON.parse(storedClasses));
-            toast({
-              title: "Offline modus",
-              description: "Lessen geladen uit lokale opslag. Database verbinding mislukt.",
-              variant: "destructive"
-            });
-          }
-        } catch (localError) {
-          console.error("Failed to parse classes from localStorage", localError);
-          setClasses([]);
-        }
+        toast({
+          title: "Database fout", 
+          description: "Kan geen verbinding maken met database.",
+          variant: "destructive"
+        });
+        setClasses([]);
         setClassesLoaded(true);
       }
     };
 
-    loadClasses();
-  }, []);
-  
-  // Update localStorage wanneer lessen veranderen (alleen na initiële load)
-  useEffect(() => {
-    if (classesLoaded) {
-      localStorage.setItem('rebelsClasses', JSON.stringify(classes));
+    if (isAuthenticated) {
+      loadClasses();
     }
-  }, [classes, classesLoaded]);
+  }, [isAuthenticated]);
 
   // Laad inschrijvingen uit database
   useEffect(() => {
@@ -151,227 +136,227 @@ const AdminPage = () => {
       try {
         const response = await apiService.getReservations();
         if (response.success) {
-          // Converteer database reserveringen naar frontend formaat
-          const formattedRegistrations = response.data.map(reservation => ({
-            id: reservation.id,
-            name: reservation.participant_name,
-            email: reservation.participant_email,
-            phone: reservation.participant_phone || '',
-            classId: `${reservation.lesson_id}-${reservation.lesson_date}`,
-            className: reservation.lesson_title,
-            classDate: reservation.lesson_date,
-            classTime: reservation.lesson_time,
-            trainer: reservation.lesson_trainer,
-            registeredAt: reservation.created_at,
-            notes: reservation.notes || ''
-          }));
-          setRegistrations(formattedRegistrations);
+          setRegistrations(response.data);
         } else {
           console.error("Failed to load registrations:", response.error);
-          // Fallback naar localStorage
-          const storedRegistrations = localStorage.getItem('rebelsRegistrations');
-          if (storedRegistrations) {
-            setRegistrations(JSON.parse(storedRegistrations));
-            toast({
-              title: "Offline modus",
-              description: "Inschrijvingen geladen uit lokale opslag. Database verbinding mislukt.",
-              variant: "destructive"
-            });
-          }
+          toast({
+            title: "Database fout",
+            description: "Kan reserveringen niet laden uit database.",
+            variant: "destructive"
+          });
+          setRegistrations([]);
         }
       } catch (error) {
         console.error("Failed to load registrations from database:", error);
-        // Fallback naar localStorage
-        try {
-          const storedRegistrations = localStorage.getItem('rebelsRegistrations');
-          if (storedRegistrations) {
-            setRegistrations(JSON.parse(storedRegistrations));
-            toast({
-              title: "Offline modus",
-              description: "Inschrijvingen geladen uit lokale opslag. Database verbinding mislukt.",
-              variant: "destructive"
-            });
-          }
-        } catch (localError) {
-          console.error("Failed to parse registrations from localStorage", localError);
-          setRegistrations([]);
-        }
+        toast({
+          title: "Database fout",
+          description: "Kan geen verbinding maken met database voor reserveringen.",
+          variant: "destructive"
+        });
+        setRegistrations([]);
       }
     };
 
-    loadRegistrations();
-  }, []);
+    if (isAuthenticated) {
+      loadRegistrations();
+    }
+  }, [isAuthenticated]);
 
-  const handleLogin = (e) => {
+
+
+  // Real-time synchronisatie met event listeners
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const handleLessonsUpdated = async () => {
+      console.log('Lessen bijgewerkt - synchroniseren admin interface');
+      try {
+        const response = await apiService.getLessons();
+        if (response.success) {
+          const formattedClasses = response.data.map(lesson => 
+            apiService.formatLessonForFrontend(lesson)
+          );
+          setClasses(formattedClasses);
+        }
+      } catch (error) {
+        console.error('Fout bij synchroniseren van lessen:', error);
+      }
+    };
+
+    const handleReservationsUpdated = async () => {
+      console.log('Reserveringen bijgewerkt - synchroniseren admin interface');
+      try {
+        const response = await apiService.getReservations();
+        if (response.success) {
+          setRegistrations(response.data);
+        }
+      } catch (error) {
+        console.error('Fout bij synchroniseren van reserveringen:', error);
+      }
+    };
+
+    // Luister naar custom events van de mock data store
+    window.addEventListener('lessonsUpdated', handleLessonsUpdated);
+    window.addEventListener('reservationsUpdated', handleReservationsUpdated);
+
+    return () => {
+      window.removeEventListener('lessonsUpdated', handleLessonsUpdated);
+      window.removeEventListener('reservationsUpdated', handleReservationsUpdated);
+    };
+  }, [isAuthenticated]);
+
+  const handleLogin = async (e) => {
     e.preventDefault();
     
-    const adminUsername = import.meta.env.VITE_ADMIN_USERNAME || 'admin';
-      const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD || 'rebels123';
+    try {
+      const response = await apiService.adminLogin(
+        loginData.username,
+        loginData.password
+      );
       
-      if (username === adminUsername && password === adminPassword) {
-      localStorage.setItem('adminAuthenticated', 'true');
-      setIsAuthenticated(true);
+      if (response.success) {
+        setIsAuthenticated(true);
+        toast({
+          title: "Ingelogd",
+          description: "Welkom in het admin panel!",
+          variant: "default"
+        });
+      } else {
+        toast({
+          title: "Login mislukt",
+          description: response.error || "Ongeldige inloggegevens",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error("Login error:", error);
       toast({
-        title: "Ingelogd!",
-        description: "Je bent succesvol ingelogd als beheerder.",
-      });
-    } else {
-      toast({
-        title: "Fout bij inloggen",
-        description: "Ongeldige gebruikersnaam of wachtwoord.",
-        variant: "destructive",
+        title: "Login fout",
+        description: "Kan geen verbinding maken met server.",
+        variant: "destructive"
       });
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('adminAuthenticated');
-    setIsAuthenticated(false);
-    toast({
-      title: "Uitgelogd",
-      description: "Je bent succesvol uitgelogd.",
-    });
+  const handleLogout = async () => {
+    try {
+      await apiService.adminLogout();
+      setIsAuthenticated(false);
+      toast({
+        title: "Uitgelogd",
+        description: "Je bent succesvol uitgelogd.",
+        variant: "default"
+      });
+    } catch (error) {
+      console.error("Logout error:", error);
+      // Zelfs als logout faalt, log lokaal uit
+      setIsAuthenticated(false);
+    }
   };
-  
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    let updatedFormData = {
-      ...formData,
+    setFormData(prev => ({
+      ...prev,
       [name]: name === 'spots' ? parseInt(value) : value
-    };
-    
-    // Automatisch dag van de week berekenen op basis van datum
-    if (name === 'date' && value) {
-      const selectedDate = new Date(value);
-      const dayOfWeek = selectedDate.getDay(); // 0 = zondag, 1 = maandag, etc.
-      updatedFormData.day = dayOfWeek === 0 ? 7 : dayOfWeek; // Converteer naar 1-7 (maandag-zondag)
-    }
-    
-    setFormData(updatedFormData);
+    }));
   };
-  
-  const handleAddClass = async (e) => {
-    e.preventDefault();
-    
-    if (!formData.title || !formData.date || !formData.time || !formData.spots) {
-       toast({
-         title: "Fout",
-         description: "Vul alle verplichte velden in (titel, datum, tijd en aantal plekken)",
-         variant: "destructive"
-       });
-       return;
-     }
-    
-    const lessonData = apiService.formatLessonForDatabase(formData);
-    
+
+
+
+  const handleSaveClass = async () => {
+    if (!formData.title || !formData.time || !formData.trainer || !formData.date) {
+      toast({
+        title: "Validatie fout",
+        description: "Vul alle verplichte velden in.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     try {
-      let response;
-      if (formData.id) {
-        // Update bestaande les
-        response = await apiService.updateLesson(formData.id, lessonData);
-        if (response.success) {
-          const updatedClasses = classes.map(cls => cls.id === formData.id ? formData : cls);
-          setClasses(updatedClasses);
-          toast({
-            title: "Les bijgewerkt",
-            description: `De les "${formData.title}" is succesvol bijgewerkt.`
-          });
-        } else {
-          throw new Error(response.error);
-        }
-      } else {
-        // Nieuwe les toevoegen
-        response = await apiService.createLesson(lessonData);
-        if (response.success) {
-          const newClass = {
-            ...formData,
-            id: response.data.id || uuidv4()
-          };
-          const updatedClasses = [...classes, newClass];
-          setClasses(updatedClasses);
-          toast({
-            title: "Les toegevoegd",
-            description: `De les "${formData.title}" is succesvol toegevoegd aan het rooster.`
-          });
-        } else {
-          throw new Error(response.error);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to save lesson to database:", error);
-      
-      // Fallback naar localStorage
-      const newClass = {
+      const lessonData = apiService.formatLessonForDatabase({
         ...formData,
-        id: formData.id || uuidv4()
-      };
-      
-      if (formData.id) {
-        const updatedClasses = classes.map(cls => cls.id === formData.id ? newClass : cls);
-        setClasses(updatedClasses);
-        localStorage.setItem('rebelsClasses', JSON.stringify(updatedClasses));
-        toast({
-          title: "Les bijgewerkt (offline)",
-          description: `De les "${newClass.title}" is lokaal opgeslagen. Database verbinding mislukt.`,
-          variant: "destructive"
-        });
+        id: editingClass ? editingClass.id : uuidv4()
+      });
+
+      let response;
+      if (editingClass) {
+        response = await apiService.updateLesson(editingClass.id, lessonData);
       } else {
-        const updatedClasses = [...classes, newClass];
-        setClasses(updatedClasses);
-        localStorage.setItem('rebelsClasses', JSON.stringify(updatedClasses));
-        toast({
-          title: "Les toegevoegd (offline)",
-          description: `De les "${newClass.title}" is lokaal opgeslagen. Database verbinding mislukt.`,
-          variant: "destructive"
-        });
+        response = await apiService.createLesson(lessonData);
       }
-    }
-    
-    setFormData({
-      id: null,
-      title: '',
-      time: '',
-      trainer: '',
-      spots: 15,
-      day: 1, // Wordt automatisch berekend
-      date: new Date().toISOString().split('T')[0],
-      description: 'Een nieuwe fitness les'
-    });
-  };
-  
-  const handleEditClass = (cls) => {
-    setFormData(cls);
-    setActiveTab('add');
-  };
-  
-  const handleDeleteClass = async (id) => {
-    try {
-      const response = await apiService.deleteLesson(id);
+
       if (response.success) {
-        setClasses(prevClasses => {
-          const updatedClasses = prevClasses.filter(c => c.id !== id);
-          toast({
-            title: "Succes",
-            description: "Les succesvol verwijderd"
-          });
-          return updatedClasses;
+        setActiveTab('classes'); // Return to classes tab after saving
+        setEditingClass(null);
+        setFormData({
+          title: '',
+          time: '',
+          trainer: '',
+          spots: 15,
+          date: new Date().toISOString().split('T')[0],
+          description: ''
+        });
+        
+        toast({
+          title: editingClass ? "Les bijgewerkt" : "Les toegevoegd",
+          description: editingClass ? "De les is succesvol bijgewerkt." : "De nieuwe les is toegevoegd.",
+          variant: "default"
         });
       } else {
-        throw new Error(response.error);
+        toast({
+          title: "Database fout",
+          description: response.error || "Kan les niet opslaan.",
+          variant: "destructive"
+        });
       }
     } catch (error) {
-      console.error("Failed to delete lesson from database:", error);
+      console.error("Error saving class:", error);
+      toast({
+        title: "Database fout",
+        description: "Kan geen verbinding maken met database.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleEditClass = (cls) => {
+    setEditingClass(cls);
+    setFormData({
+      title: cls.title,
+      time: cls.time,
+      trainer: cls.trainer,
+      spots: cls.spots,
+      date: cls.date,
+      description: cls.description || ''
+    });
+    setActiveTab('add'); // Switch to the add tab for editing
+  };
+
+  const handleDeleteClass = async (classId) => {
+    try {
+      const response = await apiService.deleteLesson(classId);
       
-      // Fallback naar localStorage
-      setClasses(prevClasses => {
-        const updatedClasses = prevClasses.filter(c => c.id !== id);
-        localStorage.setItem('rebelsClasses', JSON.stringify(updatedClasses));
+      if (response.success) {
         toast({
-          title: "Les verwijderd (offline)",
-          description: "Les lokaal verwijderd. Database verbinding mislukt.",
+          title: "Les verwijderd",
+          description: "De les is succesvol verwijderd.",
+          variant: "default"
+        });
+      } else {
+        toast({
+          title: "Database fout",
+          description: response.error || "Kan les niet verwijderen.",
           variant: "destructive"
         });
-        return updatedClasses;
+      }
+    } catch (error) {
+      console.error("Error deleting class:", error);
+      toast({
+        title: "Database fout",
+        description: "Kan geen verbinding maken met database.",
+        variant: "destructive"
       });
     }
   };
@@ -396,8 +381,8 @@ const AdminPage = () => {
               <Input
                 id="username"
                 type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                value={loginData.username}
+                onChange={(e) => setLoginData(prev => ({ ...prev, username: e.target.value }))}
                 className="bg-zinc-800 border-zinc-700 text-white"
                 required
               />
@@ -408,8 +393,8 @@ const AdminPage = () => {
               <Input
                 id="password"
                 type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                value={loginData.password}
+                onChange={(e) => setLoginData(prev => ({ ...prev, password: e.target.value }))}
                 className="bg-zinc-800 border-zinc-700 text-white"
                 required
               />
@@ -431,8 +416,6 @@ const AdminPage = () => {
       </div>
     );
   }
-  
-  const filteredClasses = classes.filter(cls => cls.day === selectedDay);
   
   return (
     <div className="min-h-screen bg-black text-white pt-20">
@@ -459,7 +442,18 @@ const AdminPage = () => {
           </button>
           <button
             className={`px-4 py-2 ${activeTab === 'add' ? 'text-red-600 border-b-2 border-red-600' : 'text-gray-400'}`}
-            onClick={() => setActiveTab('add')}
+            onClick={() => {
+              setActiveTab('add');
+              setEditingClass(null);
+              setFormData({
+                title: '',
+                time: '',
+                trainer: '',
+                spots: 15,
+                date: new Date().toISOString().split('T')[0],
+                description: ''
+              });
+            }}
           >
             Les Toevoegen/Bewerken
           </button>
@@ -472,186 +466,118 @@ const AdminPage = () => {
                 <Calendar className="mr-2 h-5 w-5 text-red-600" />
                 <h2 className="text-xl font-semibold">Lessen Beheren</h2>
               </div>
-              <Button onClick={() => {
-                setFormData({
-                  id: null,
-                  title: '',
-                  time: '',
-                  trainer: '',
-                  spots: 15,
-                  day: 1, // Wordt automatisch berekend
-                  date: new Date().toISOString().split('T')[0],
-                  description: 'Een nieuwe fitness les'
-                });
-                setActiveTab('add');
-              }} className="bg-red-600 hover:bg-red-700">
-                <Plus className="mr-2 h-4 w-4" /> Nieuwe Les
-              </Button>
-            </div>
-
-            {/* Week navigatie */}
-            <div className="bg-zinc-900 rounded-lg p-4 mb-6">
-              <div className="flex items-center justify-between">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigateWeek(-1)}
-                  className="flex items-center"
-                >
-                  <ChevronLeft className="h-4 w-4 mr-1" />
-                  Vorige Week
-                </Button>
-                
-                <div className="text-center">
-                  <h3 className="text-lg font-semibold text-white">
-                    Week van {formatWeekRange(currentWeek)}
-                  </h3>
-                  <p className="text-sm text-gray-400">
-                    {currentWeek.toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                  </p>
-                </div>
-                
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigateWeek(1)}
-                  className="flex items-center"
-                >
-                  Volgende Week
-                  <ChevronRight className="h-4 w-4 ml-1" />
+              <div className="flex gap-2">
+                <Button onClick={() => {
+                  setActiveTab('add');
+                  setEditingClass(null);
+                  setFormData({
+                    title: '',
+                    time: '',
+                    trainer: '',
+                    spots: 15,
+                    date: new Date().toISOString().split('T')[0],
+                    description: ''
+                  });
+                }} className="bg-red-600 hover:bg-red-700">
+                  <Plus className="mr-2 h-4 w-4" /> Nieuwe Les
                 </Button>
               </div>
             </div>
+
+
             
             {classes.length === 0 ? (
               <div className="bg-zinc-900 rounded-lg p-8 text-center">
                 <p className="text-gray-400">Nog geen lessen toegevoegd.</p>
                 <Button onClick={() => {
+                  setActiveTab('add');
+                  setEditingClass(null);
                   setFormData({
-                    id: null,
                     title: '',
                     time: '',
                     trainer: '',
                     spots: 15,
-                    day: 1, // Wordt automatisch berekend
                     date: new Date().toISOString().split('T')[0],
-                    description: 'Een nieuwe fitness les'
+                    description: ''
                   });
-                  setActiveTab('add');
                 }} className="mt-4 bg-red-600 hover:bg-red-700">
                   <Plus className="mr-2 h-4 w-4" /> Eerste Les Toevoegen
                 </Button>
               </div>
             ) : (
-              (() => {
-                const weekClasses = classes.filter(cls => !cls.date || isDateInCurrentWeek(cls.date));
-                if (weekClasses.length === 0) {
-                  return (
-                    <div className="bg-zinc-900 rounded-lg p-8 text-center">
-                      <Calendar className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                      <p className="text-gray-400 mb-2">Geen lessen gevonden voor deze week.</p>
-                      <p className="text-sm text-gray-500 mb-4">
-                        Week van {formatWeekRange(currentWeek)}
-                      </p>
-                      <Button onClick={() => {
-                        setFormData({
-                          id: null,
-                          title: '',
-                          time: '',
-                          trainer: '',
-                          spots: 15,
-                          day: 1,
-                          date: getWeekStart(currentWeek).toISOString().split('T')[0],
-                          description: 'Een nieuwe fitness les'
-                        });
-                        setActiveTab('add');
-                      }} className="bg-red-600 hover:bg-red-700">
-                        <Plus className="mr-2 h-4 w-4" /> Les Toevoegen voor Deze Week
-                      </Button>
-                    </div>
-                  );
-                }
-                return (
               <div className="space-y-6">
-                {[1, 2, 3, 4, 5, 6, 7].map(day => {
-                  const dayClasses = classes.filter(cls => 
-                    cls.day === day && (!cls.date || isDateInCurrentWeek(cls.date))
-                  );
-                  const dayNames = {
-                    1: 'Maandag',
-                    2: 'Dinsdag', 
-                    3: 'Woensdag',
-                    4: 'Donderdag',
-                    5: 'Vrijdag',
-                    6: 'Zaterdag',
-                    7: 'Zondag'
-                  };
-                  
-                  if (dayClasses.length === 0) return null;
-                  
-                  return (
-                    <div key={day} className="bg-zinc-900 rounded-lg p-6">
-                      <h3 className="text-lg font-semibold mb-4 text-red-600">{dayNames[day]}</h3>
-                      <div className="grid gap-4">
-                        {dayClasses
-                          .sort((a, b) => {
-                            const timeA = a.time.split(' - ')[0];
-                            const timeB = b.time.split(' - ')[0];
-                            return timeA.localeCompare(timeB);
-                          })
-                          .map(cls => (
-                            <div key={cls.id} className="bg-zinc-800 rounded-lg p-4 flex justify-between items-center">
-                              <div>
-                                <h4 className="text-lg font-semibold">{cls.title}</h4>
-                                <div className="flex mt-2 space-x-6 text-gray-400 text-sm">
-                                  <div className="flex items-center">
-                                    <Clock className="mr-1 h-3 w-3" />
-                                    {cls.time}
-                                  </div>
-                                  <div className="flex items-center">
-                                    <Users className="mr-1 h-3 w-3" />
-                                    {cls.trainer}
-                                  </div>
-                                  <div className="flex items-center">
-                                    <Users className="mr-1 h-3 w-3" />
-                                    {(() => {
-                                      const availableSpots = getAvailableSpots(cls.id, cls.spots);
-                                      const reservedSpots = cls.spots - availableSpots;
-                                      return (
-                                        <span className={availableSpots === 0 ? 'text-red-400' : availableSpots <= 3 ? 'text-yellow-400' : 'text-green-400'}>
-                                          {availableSpots}/{cls.spots} beschikbaar
-                                        </span>
-                                      );
-                                    })()}
-                                  </div>
-                                  {cls.date && (
-                                    <div className="flex items-center">
-                                      <Calendar className="mr-1 h-3 w-3" />
-                                      {new Date(cls.date).toLocaleDateString('nl-NL')}
-                                    </div>
-                                  )}
+                {/* Toon alle lessen in een lijst */}
+                <div className="bg-zinc-900 rounded-lg p-6">
+                  <h3 className="text-lg font-semibold mb-4 text-red-600">
+                    Alle Lessen
+                  </h3>
+                  <div className="grid gap-4">
+                    {classes
+                      .sort((a, b) => {
+                        // Sorteer op datum en dan op tijd
+                        if (a.date !== b.date) {
+                          return new Date(a.date) - new Date(b.date);
+                        }
+                        const timeA = a.time.split(' - ')[0];
+                        const timeB = b.time.split(' - ')[0];
+                        return timeA.localeCompare(timeB);
+                      })
+                      .map(cls => (
+                        <div key={cls.id} className="bg-zinc-800 rounded-lg p-4 flex justify-between items-center">
+                          <div>
+                            <h4 className="text-lg font-semibold">{cls.title}</h4>
+                            <div className="flex mt-2 space-x-6 text-gray-400 text-sm">
+                              <div className="flex items-center">
+                                <Clock className="mr-1 h-3 w-3" />
+                                {cls.time}
+                              </div>
+                              <div className="flex items-center">
+                                <Users className="mr-1 h-3 w-3" />
+                                {cls.trainer}
+                              </div>
+                              <div className="flex items-center">
+                                <Users className="mr-1 h-3 w-3" />
+                                {(() => {
+                                  const availableSpots = getAvailableSpots(cls.id, cls.spots);
+                                  return (
+                                    <span className={availableSpots === 0 ? 'text-red-400' : availableSpots <= 3 ? 'text-yellow-400' : 'text-green-400'}>
+                                      {availableSpots}/{cls.spots} beschikbaar
+                                    </span>
+                                  );
+                                })()}
+                              </div>
+                              {cls.date && (
+                                <div className="flex items-center">
+                                  <Calendar className="mr-1 h-3 w-3" />
+                                  {(() => {
+                                    const dateParts = cls.date.split('-');
+                                    const year = parseInt(dateParts[0], 10);
+                                    const month = parseInt(dateParts[1], 10) - 1;
+                                    const day = parseInt(dateParts[2], 10);
+                                    const safeDate = new Date(year, month, day);
+                                    return safeDate.toLocaleDateString('nl-NL');
+                                  })()}
                                 </div>
-                                {cls.description && (
-                                  <p className="text-gray-500 text-sm mt-1">{cls.description}</p>
-                                )}
-                              </div>
-                              <div className="flex space-x-2">
-                                <Button variant="outline" size="sm" onClick={() => handleEditClass(cls)}>
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button variant="destructive" size="sm" onClick={() => handleDeleteClass(cls.id)}>
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
+                              )}
                             </div>
-                          ))}
-                      </div>
-                    </div>
-                  );
-                })}
+                            {cls.description && (
+                              <p className="text-gray-500 text-sm mt-1">{cls.description}</p>
+                            )}
+                          </div>
+                          <div className="flex space-x-2">
+                            <Button variant="outline" size="sm" onClick={() => handleEditClass(cls)}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button variant="outline" size="sm" className="text-red-500" onClick={() => handleDeleteClass(cls.id)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
               </div>
-                );
-              })()
             )}
           </div>
         )}
@@ -676,99 +602,86 @@ const AdminPage = () => {
                 </div>
                 
                 {registrations
-                  .sort((a, b) => new Date(b.registeredAt) - new Date(a.registeredAt))
-                  .map((registration) => (
-                    <motion.div
-                      key={registration.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="bg-zinc-800 rounded-lg p-6 border border-zinc-700"
-                    >
-                      <div className="flex flex-col md:flex-row md:items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-4 mb-3">
-                            <h3 className="text-lg font-semibold text-white">
-                              {registration.name}
-                            </h3>
-                            <span className="px-2 py-1 bg-red-600 text-white text-xs rounded-full">
-                              Ingeschreven
-                            </span>
-                          </div>
-                          
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                            <div>
-                              <span className="text-gray-400">Email:</span>
-                              <span className="ml-2 text-white">{registration.email}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-400">Les:</span>
-                              <span className="ml-2 text-white">{registration.className}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-400">Datum:</span>
-                              <span className="ml-2 text-white">{registration.classDate}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-400">Tijd:</span>
-                              <span className="ml-2 text-white">{registration.classTime}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-400">Ingeschreven op:</span>
-                              <span className="ml-2 text-white">
-                                {new Date(registration.registeredAt).toLocaleString('nl-NL')}
+                  .sort((a, b) => new Date(b.registeredAt || b.created_at) - new Date(a.registeredAt || a.created_at))
+                  .map((registration) => {
+                    const classInfo = getClassInfoForRegistration(registration);
+                    return (
+                      <motion.div
+                        key={registration.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-zinc-800 rounded-lg p-6 border border-zinc-700"
+                      >
+                        <div className="flex flex-col md:flex-row md:items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-4 mb-3">
+                              <h3 className="text-lg font-semibold text-white">
+                                {registration.name || registration.participant_name}
+                              </h3>
+                              <span className="px-2 py-1 bg-red-600 text-white text-xs rounded-full">
+                                Ingeschreven
                               </span>
                             </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+                              <div>
+                                <span className="text-gray-400">Email:</span>
+                                <span className="ml-2 text-white">{registration.email || registration.participant_email}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400">Les:</span>
+                                <span className="ml-2 text-white">{classInfo.name || classInfo.title || registration.className || 'Onbekende les'}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400">Datum:</span>
+                                <span className="ml-2 text-white">{registration.classDate || registration.lesson_date}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400">Tijd:</span>
+                                <span className="ml-2 text-white">{classInfo.time || registration.classTime || 'Tijd niet beschikbaar'}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400">Trainer:</span>
+                                <span className="ml-2 text-white">{classInfo.trainer || 'Trainer niet beschikbaar'}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400">Telefoon:</span>
+                                <span className="ml-2 text-white">{registration.phone || registration.participant_phone || 'Niet opgegeven'}</span>
+                              </div>
+                              <div className="md:col-span-2 lg:col-span-3">
+                                <span className="text-gray-400">Beschrijving:</span>
+                                <span className="ml-2 text-white">{classInfo.description || 'Geen beschrijving beschikbaar'}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400">Ingeschreven op:</span>
+                                <span className="ml-2 text-white">
+                                  {new Date(registration.registeredAt || registration.created_at || registration.timestamp).toLocaleString('nl-NL')}
+                                </span>
+                              </div>
+                              {registration.notes && (
+                                <div className="md:col-span-2 lg:col-span-3">
+                                  <span className="text-gray-400">Opmerkingen:</span>
+                                  <span className="ml-2 text-white">{registration.notes}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          
+                          <div className="mt-4 md:mt-0 md:ml-4">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-red-500 border-red-500 hover:bg-red-500 hover:text-white"
+                              onClick={() => handleDeleteRegistration(registration.id)}
+                            >
+                              <Trash2 className="h-4 w-4 mr-1" />
+                              Verwijderen
+                            </Button>
                           </div>
                         </div>
-                        
-                        <div className="mt-4 md:mt-0 md:ml-6">
-                          <Button
-                            onClick={() => {
-                              // Functie om inschrijving te verwijderen
-                              const updatedRegistrations = registrations.filter(r => r.id !== registration.id);
-                              setRegistrations(updatedRegistrations);
-                              localStorage.setItem('rebelsRegistrations', JSON.stringify(updatedRegistrations));
-                              
-                              // Update ook de reserveringen voor backwards compatibility
-                              const reservationKey = 'rebelsReservations';
-                              const existingReservations = JSON.parse(localStorage.getItem(reservationKey) || '{}');
-                              
-                              if (existingReservations[registration.classId]) {
-                                existingReservations[registration.classId].reservedSpots = Math.max(0, 
-                                  existingReservations[registration.classId].reservedSpots - 1
-                                );
-                                
-                                // Verwijder de reservering helemaal als er geen spots meer zijn
-                                if (existingReservations[registration.classId].reservedSpots === 0) {
-                                  delete existingReservations[registration.classId];
-                                }
-                              }
-                              
-                              localStorage.setItem(reservationKey, JSON.stringify(existingReservations));
-                              
-                              // Trigger storage event voor andere componenten
-                              window.dispatchEvent(new StorageEvent('storage', {
-                                key: reservationKey,
-                                newValue: JSON.stringify(existingReservations),
-                                storageArea: localStorage
-                              }));
-                              
-                              toast({
-                                title: "Inschrijving verwijderd",
-                                description: `Inschrijving van ${registration.name} is verwijderd. De plek is weer beschikbaar.`,
-                              });
-                            }}
-                            variant="outline"
-                            size="sm"
-                            className="text-red-400 border-red-400 hover:bg-red-400 hover:text-white"
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Verwijderen
-                          </Button>
-                        </div>
-                      </div>
-                    </motion.div>
-                  ))}
+                      </motion.div>
+                    );
+                  })}
               </div>
             )}
           </div>
@@ -779,11 +692,11 @@ const AdminPage = () => {
             <div className="flex items-center mb-6">
               <Calendar className="mr-2 h-5 w-5 text-red-600" />
               <h2 className="text-xl font-semibold">
-                {formData.id ? 'Les Bewerken' : 'Nieuwe Les Toevoegen'}
+                {editingClass ? 'Les Bewerken' : 'Nieuwe Les Toevoegen'}
               </h2>
             </div>
             
-            <form onSubmit={handleAddClass} className="bg-zinc-900 rounded-lg p-6 space-y-6">
+            <div className="bg-zinc-900 rounded-lg p-6 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <Label htmlFor="title">Naam van de les</Label>
@@ -866,25 +779,24 @@ const AdminPage = () => {
                   variant="outline"
                   onClick={() => {
                     setActiveTab('classes');
+                    setEditingClass(null);
                     setFormData({
-                      id: null,
                       title: '',
                       time: '',
                       trainer: '',
                       spots: 15,
-                      day: 1, // Wordt automatisch berekend
                       date: new Date().toISOString().split('T')[0],
-                      description: 'Een nieuwe fitness les'
+                      description: ''
                     });
                   }}
                 >
                   Annuleren
                 </Button>
-                <Button type="submit" className="bg-red-600 hover:bg-red-700">
-                  {formData.id ? 'Les Bijwerken' : 'Les Toevoegen'}
+                <Button onClick={handleSaveClass} className="bg-red-600 hover:bg-red-700">
+                  {editingClass ? 'Les Bijwerken' : 'Les Toevoegen'}
                 </Button>
               </div>
-            </form>
+            </div>
           </div>
         )}
       </div>

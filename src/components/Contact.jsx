@@ -72,7 +72,7 @@ const Contact = () => {
               <MapPin className="h-6 w-6 text-red-600" />
               <div>
                 <h3 className="text-lg font-semibold text-white">Adres</h3>
-                <p className="text-gray-300">Sportlaan 123, 1234 AB Amsterdam</p>
+                <p className="text-gray-300">Zuiveringsweg 74, 8243 PE Lelystad</p>
               </div>
             </div>
 
@@ -80,7 +80,7 @@ const Contact = () => {
               <Phone className="h-6 w-6 text-red-600" />
               <div>
                 <h3 className="text-lg font-semibold text-white">Telefoon</h3>
-                <p className="text-gray-300">020 - 123 4567</p>
+                <p className="text-gray-300">0320-417472</p>
               </div>
             </div>
 
@@ -96,7 +96,7 @@ const Contact = () => {
               <Clock className="h-6 w-6 text-red-600" />
               <div>
                 <h3 className="text-lg font-semibold text-white">Openingstijden</h3>
-                <p className="text-gray-300">Ma-Vr: 06:00 - 23:00<br />Za-Zo: 08:00 - 20:00</p>
+                <p className="text-gray-300">Ma-Vr: 09:30 - 21:30<br />Za-Zo: 10:00 - 17:00</p>
               </div>
             </div>
           </motion.div>

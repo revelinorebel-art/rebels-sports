@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS lessons (
     time TIME NOT NULL,
     trainer VARCHAR(255) NOT NULL,
     spots INT NOT NULL DEFAULT 15,
-    day_of_week TINYINT NOT NULL COMMENT '1=Maandag, 7=Zondag',
+    day_of_week TINYINT NULL COMMENT '1=Maandag, 7=Zondag (optioneel voor specifieke datum lessen)',
     specific_date DATE NULL COMMENT 'Voor specifieke datum lessen',
     description TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -55,7 +55,10 @@ CREATE TABLE IF NOT EXISTS admin_users (
     username VARCHAR(50) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     email VARCHAR(255),
+    role VARCHAR(20) DEFAULT 'admin',
     last_login TIMESTAMP NULL,
+    failed_login_attempts INT DEFAULT 0,
+    last_failed_login TIMESTAMP NULL,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -63,17 +66,17 @@ CREATE TABLE IF NOT EXISTS admin_users (
 
 -- Maak sessies tabel voor admin authenticatie
 CREATE TABLE IF NOT EXISTS admin_sessions (
-    id VARCHAR(128) PRIMARY KEY,
-    user_id INT NOT NULL,
+    session_token VARCHAR(128) PRIMARY KEY,
+    admin_id INT NOT NULL,
     expires_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES admin_users(id) ON DELETE CASCADE,
+    FOREIGN KEY (admin_id) REFERENCES admin_users(id) ON DELETE CASCADE,
     INDEX idx_expires (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Voeg standaard admin gebruiker toe (verander wachtwoord!)
+-- Voeg standaard admin gebruiker toe (username: rebeladmin, password: rebels123)
 INSERT INTO admin_users (username, password_hash, email) VALUES 
-('admin', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@rebelssports.nl')
+('rebeladmin', '$2b$10$28YKJDZva97oCxqdwk5lS.GiOp6MwDiZwYVTXCxWSHhXa/nfkaSzC', 'admin@rebelssports.nl')
 ON DUPLICATE KEY UPDATE username = username;
 
 -- Voeg wat voorbeeld services toe

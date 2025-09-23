@@ -12,6 +12,8 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { useToast } from '@/components/ui/use-toast';
+import apiService from '@/services/apiService';
 
 const initialServicesData = [
   {
@@ -109,34 +111,49 @@ const ServicesPage = ({ isAdminMode }) => {
   const [services, setServices] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentService, setCurrentService] = useState(null);
+  const { toast } = useToast();
 
-  useEffect(() => {
+  const loadServices = async () => {
     try {
-      const storedServices = localStorage.getItem('rebelsServices');
-      if (storedServices) {
-        setServices(JSON.parse(storedServices));
+      const servicesData = await apiService.getServices();
+      if (servicesData && servicesData.length > 0) {
+        setServices(servicesData);
       } else {
         setServices(initialServicesData);
       }
     } catch (error) {
-      console.error("Failed to parse services from localStorage", error);
+      console.error("Failed to load services from database:", error);
       setServices(initialServicesData);
     }
-  }, []);
+  };
 
   useEffect(() => {
-    localStorage.setItem('rebelsServices', JSON.stringify(services));
-  }, [services]);
+    loadServices();
+  }, []);
 
   const handleEditClick = (service) => {
     setCurrentService(service);
     setIsModalOpen(true);
   };
 
-  const handleSave = () => {
-    setServices(services.map(s => s.id === currentService.id ? currentService : s));
-    setIsModalOpen(false);
-    setCurrentService(null);
+  const handleSave = async () => {
+    try {
+      await apiService.updateService(currentService);
+      setServices(services.map(s => s.id === currentService.id ? currentService : s));
+      setIsModalOpen(false);
+      setCurrentService(null);
+      toast({
+        title: "Service bijgewerkt",
+        description: "De service is succesvol bijgewerkt.",
+      });
+    } catch (error) {
+      console.error("Failed to update service:", error);
+      toast({
+        title: "Fout",
+        description: "Er is een fout opgetreden bij het bijwerken van de service.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleInputChange = (e) => {

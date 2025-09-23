@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clear Rebels Sports localStorage</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #1a1a1a;
+            color: #ffffff;
+        }
+        .container {
+            background-color: #2a2a2a;
+            padding: 30px;
+            border-radius: 10px;
+            border: 2px solid #dc2626;
+        }
+        .success {
+            background-color: #065f46;
+            color: #10b981;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .info {
+            background-color: #1e3a8a;
+            color: #60a5fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        button {
+            background-color: #dc2626;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background-color: #b91c1c;
+        }
+        .data-display {
+            background-color: #374151;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗑️ Rebels Sports localStorage Manager</h1>
+        
+        <div class="info">
+            <strong>ℹ️ Info:</strong> Deze pagina helpt je om alle localStorage data van Rebels Sports te wissen, zodat de applicatie uitsluitend de Hostinger database gebruikt.
+        </div>
+
+        <div id="status"></div>
+        
+        <button onclick="checkLocalStorage()">📊 Controleer localStorage</button>
+        <button onclick="clearLocalStorage()">🗑️ Wis localStorage</button>
+        <button onclick="goToApp()">🏠 Ga naar App</button>
+        
+        <div id="dataDisplay" class="data-display" style="display: none;"></div>
+    </div>
+
+    <script>
+        // localStorage keys used by Rebels Sports
+        const rebelsKeys = [
+            'rebelsClasses',
+            'rebelsRegistrations', 
+            'rebelsServices',
+            'adminAuthenticated',
+            'fitzoneClasses' // Legacy key
+        ];
+
+        function checkLocalStorage() {
+            const dataDisplay = document.getElementById('dataDisplay');
+            const status = document.getElementById('status');
+            
+            let output = '📊 Huidige localStorage data:\n\n';
+            let hasData = false;
+            
+            rebelsKeys.forEach(key => {
+                const data = localStorage.getItem(key);
+                if (data) {
+                    hasData = true;
+                    try {
+                        const parsed = JSON.parse(data);
+                        output += `${key}:\n${JSON.stringify(parsed, null, 2)}\n\n`;
+                    } catch (e) {
+                        output += `${key}: ${data}\n\n`;
+                    }
+                } else {
+                    output += `${key}: (niet gevonden)\n\n`;
+                }
+            });
+            
+            if (!hasData) {
+                status.innerHTML = '<div class="success">✅ Geen Rebels Sports localStorage data gevonden!</div>';
+                output += '✅ Alle localStorage data is al gewist!';
+            } else {
+                status.innerHTML = '<div class="info">📊 localStorage data gevonden (zie hieronder)</div>';
+            }
+            
+            dataDisplay.textContent = output;
+            dataDisplay.style.display = 'block';
+        }
+
+        function clearLocalStorage() {
+            const status = document.getElementById('status');
+            
+            try {
+                let removedCount = 0;
+                rebelsKeys.forEach(key => {
+                    if (localStorage.getItem(key)) {
+                        localStorage.removeItem(key);
+                        removedCount++;
+                    }
+                });
+                
+                status.innerHTML = `<div class="success">✅ localStorage gewist! ${removedCount} items verwijderd.</div>`;
+                
+                // Update display
+                setTimeout(() => {
+                    checkLocalStorage();
+                }, 500);
+                
+            } catch (error) {
+                status.innerHTML = `<div style="background-color: #7f1d1d; color: #fca5a5; padding: 15px; border-radius: 5px;">❌ Fout bij wissen: ${error.message}</div>`;
+            }
+        }
+
+        function goToApp() {
+            window.location.href = 'http://localhost:5173';
+        }
+
+        // Auto-check on page load
+        window.onload = function() {
+            checkLocalStorage();
+        };
+    </script>
+</body>
+</html>

@@ -50,7 +50,7 @@ const Hero = () => {
           className="flex flex-col sm:flex-row gap-4"
         >
           <Button asChild size="lg" className="bg-red-600 hover:bg-red-700 text-white font-semibold px-8 py-4 text-lg">
-            <Link to="/lidmaatschappen">
+            <Link to="/prijzen">
               Start Vandaag
               <ArrowRight className="ml-2 h-5 w-5" />
             </Link>

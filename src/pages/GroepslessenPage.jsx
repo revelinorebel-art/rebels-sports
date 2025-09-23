@@ -11,7 +11,7 @@ import apiService from '@/services/apiService';
 const GroepslessenPage = () => {
   const [classes, setClasses] = useState([]);
   const [reservations, setReservations] = useState({});
-  const [selectedDay, setSelectedDay] = useState('maandag');
+  const [selectedDay, setSelectedDay] = useState(1); // 1 = Maandag
   const [currentWeek, setCurrentWeek] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedClass, setSelectedClass] = useState(null);
@@ -25,78 +25,108 @@ const GroepslessenPage = () => {
         // Groepeer reserveringen per les en datum
         const reservationCounts = {};
         response.data.forEach(reservation => {
-          const key = `${reservation.lesson_id}-${reservation.lesson_date}`;
+          // Gebruik dezelfde key format als in capaciteitsberekening
+          const lessonId = reservation.lesson_id || reservation.classId;
+          const lessonDate = reservation.lesson_date || reservation.classDate;
+          const key = `${lessonId}-${lessonDate}`;
           reservationCounts[key] = (reservationCounts[key] || 0) + 1;
         });
         setReservations(reservationCounts);
+      } else {
+        console.error("Failed to load reservations:", response.error);
+        setReservations({});
       }
     } catch (error) {
       console.error("Failed to load reservations:", error);
-      // Fallback naar localStorage
-      try {
-        const storedReservations = localStorage.getItem('rebelsReservations');
-        if (storedReservations) {
-          const parsed = JSON.parse(storedReservations);
-          const counts = {};
-          Object.keys(parsed).forEach(key => {
-            counts[key] = parsed[key].reservedSpots || 0;
-          });
-          setReservations(counts);
-        }
-      } catch (localError) {
-        console.error("Failed to parse reservations from localStorage", localError);
+      setReservations({});
+    }
+  };
+
+  // Functie om lessen te laden/herladen
+  const loadClasses = async () => {
+    try {
+      const response = await apiService.getLessons();
+      
+      if (response.success) {
+        // Converteer database format naar frontend format
+        const formattedClasses = response.data.map(lesson => 
+          apiService.formatLessonForFrontend(lesson)
+        );
+        setClasses(formattedClasses);
+      } else {
+        console.error("Failed to load classes:", response.error);
+        setClasses([]);
+        toast({
+          title: "Database fout",
+          description: "Kon lessen niet laden uit database.",
+          variant: "destructive"
+        });
       }
+    } catch (error) {
+      console.error("Failed to load classes from database:", error);
+      setClasses([]);
+      toast({
+        title: "Verbindingsfout",
+        description: "Kon geen verbinding maken met de database.",
+        variant: "destructive"
+      });
     }
   };
 
   // Laad lessen uit database
   useEffect(() => {
-    const loadClasses = async () => {
-      try {
-        const response = await apiService.getLessons();
-        if (response.success) {
-          // Converteer database format naar frontend format
-          const formattedClasses = response.data.map(lesson => 
-            apiService.formatLessonForFrontend(lesson)
-          );
-          setClasses(formattedClasses);
-        } else {
-          console.error("Failed to load classes:", response.error);
-          setClasses([]);
-        }
-      } catch (error) {
-        console.error("Failed to load classes from database:", error);
-        // Fallback naar localStorage voor backwards compatibility
-        try {
-          const storedClasses = localStorage.getItem('rebelsClasses');
-          if (storedClasses) {
-            setClasses(JSON.parse(storedClasses));
-            toast({
-              title: "Offline modus",
-              description: "Lessen geladen uit lokale opslag. Database verbinding mislukt.",
-              variant: "destructive"
-            });
-          } else {
-            setClasses([]);
-          }
-        } catch (localError) {
-          console.error("Failed to parse classes from localStorage", localError);
-          setClasses([]);
-        }
-      }
-    };
-
-    const loadData = async () => {
-      await loadClasses();
-      await loadReservations();
-    };
-
-    loadData();
+    loadClasses();
+    loadReservations();
     
     // Stel de huidige dag in als standaard
     const today = new Date();
     const dayOfWeek = today.getDay();
     setSelectedDay(dayOfWeek === 0 ? 7 : dayOfWeek);
+  }, []);
+
+  // Auto-synchronisatie wanneer gebruiker terugkeert naar de pagina
+  useEffect(() => {
+    const handleFocus = () => {
+      console.log("GroepslessenPage focused - refreshing lessons for synchronization");
+      loadClasses();
+    };
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        console.log("GroepslessenPage became visible - refreshing lessons for synchronization");
+        loadClasses();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  // Real-time synchronisatie met event listeners
+  useEffect(() => {
+    const handleLessonsUpdated = () => {
+      console.log('Lessen bijgewerkt - synchroniseren frontend weekrooster');
+      loadClasses();
+    };
+
+    const handleReservationsUpdated = () => {
+      console.log('Reserveringen bijgewerkt - synchroniseren frontend weekrooster');
+      loadReservations();
+    };
+
+    // Luister naar custom events van de mock data store
+    window.addEventListener('lessonsUpdated', handleLessonsUpdated);
+    window.addEventListener('reservationsUpdated', handleReservationsUpdated);
+
+    return () => {
+      window.removeEventListener('lessonsUpdated', handleLessonsUpdated);
+      window.removeEventListener('reservationsUpdated', handleReservationsUpdated);
+    };
   }, []);
 
   // Dagen van de week
@@ -136,16 +166,27 @@ const GroepslessenPage = () => {
     const selectedDate = weekDates.find(d => d.value === selectedDay)?.fullDate;
     if (!selectedDate) return [];
 
-    // Filter lessen op basis van geselecteerde dag van de week
+    const dateString = selectedDate.toISOString().split('T')[0];
+
+    // Filter lessen op basis van geselecteerde dag van de week (herhalende lessen)
     const dayClasses = classes.filter(cls => cls.day === selectedDay);
     
+    // Filter lessen met specifieke datum die overeenkomt met de geselecteerde datum
+    const specificDateClasses = classes.filter(cls => 
+      cls.specific_date === dateString && !cls.day
+    );
+    
+    // Combineer herhalende lessen en specifieke datum lessen
+    const allClasses = [...dayClasses, ...specificDateClasses];
+    
     // Genereer unieke lessen voor deze specifieke datum
-    return dayClasses.map(cls => {
-      const dateSpecificId = `${cls.id}-${selectedDate.toISOString().split('T')[0]}`;
-      const dateString = selectedDate.toISOString().split('T')[0];
+    return allClasses.map(cls => {
+      const dateSpecificId = cls.specific_date ? cls.id : `${cls.id}-${dateString}`;
       
       // Bereken beschikbare plekken op basis van reserveringen
-      const reservedSpots = reservations[dateSpecificId] || 0;
+      // Gebruik dezelfde key format als in loadReservations: lessonId-lessonDate
+      const reservationKey = `${cls.id}-${dateString}`;
+      const reservedSpots = reservations[reservationKey] || 0;
       const availableSpots = Math.max(0, cls.spots - reservedSpots);
       
       return {
@@ -153,7 +194,7 @@ const GroepslessenPage = () => {
         id: dateSpecificId, // Unieke ID per datum
         originalId: cls.id, // Bewaar originele ID
         date: dateString, // Voeg datum toe
-        spots: availableSpots, // Aangepaste beschikbare plekken
+        availableSpots: availableSpots, // Beschikbare plekken
         totalSpots: cls.spots, // Bewaar originele aantal plekken
         reservedSpots: reservedSpots, // Aantal gereserveerde plekken
         displayDate: selectedDate.toLocaleDateString('nl-NL', { 
@@ -177,6 +218,16 @@ const GroepslessenPage = () => {
 
   // Functie om de inschrijfmodal te openen
   const openRegistrationModal = (classItem) => {
+    // Controleer of de les vol is
+    if (classItem.availableSpots <= 0) {
+      toast({
+        title: "Les is vol",
+        description: "Deze les heeft geen beschikbare plekken meer. Probeer een andere les of datum.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
     setSelectedClass(classItem);
     setIsModalOpen(true);
   };
@@ -207,31 +258,11 @@ const GroepslessenPage = () => {
     } catch (error) {
       console.error('Error processing registration:', error);
       
-      // Fallback naar localStorage voor backwards compatibility
-      try {
-        const registrationsKey = 'rebelsRegistrations';
-        const existingRegistrations = JSON.parse(localStorage.getItem(registrationsKey) || '[]');
-        
-        const newRegistration = {
-          id: Date.now().toString(),
-          ...registrationData,
-          registeredAt: new Date().toISOString()
-        };
-        
-        existingRegistrations.push(newRegistration);
-        localStorage.setItem(registrationsKey, JSON.stringify(existingRegistrations));
-
-        await sendEmailNotification(registrationData);
-
-        toast({
-          title: "Inschrijving bevestigd (offline)!",
-          description: `Hallo ${registrationData.name}, je inschrijving is lokaal opgeslagen. Database verbinding mislukt.`,
-          variant: "destructive"
-        });
-      } catch (fallbackError) {
-        console.error('Fallback registration failed:', fallbackError);
-        throw error;
-      }
+      toast({
+        title: "Reservering mislukt",
+        description: "Er is een fout opgetreden bij het verwerken van je reservering. Probeer het opnieuw of neem contact op.",
+        variant: "destructive"
+      });
     }
   };
 
@@ -455,7 +486,12 @@ const GroepslessenPage = () => {
                           
                           <div className="flex items-center">
                             <MapPin className="mr-2 h-4 w-4 text-red-600" />
-                            <span>{cls.spots} plekken beschikbaar</span>
+                            <span>
+                              {cls.availableSpots > 0 
+                                ? `${cls.availableSpots} van ${cls.totalSpots} plekken beschikbaar`
+                                : 'VOL'
+                              }
+                            </span>
                           </div>
                         </div>
 
@@ -469,14 +505,14 @@ const GroepslessenPage = () => {
                       <div className="mt-4 md:mt-0 md:ml-6">
                         <Button
                           onClick={() => openRegistrationModal(cls)}
-                          disabled={cls.spots <= 0}
+                          disabled={cls.availableSpots <= 0}
                           className={`w-full md:w-auto ${
-                            cls.spots <= 0
+                            cls.availableSpots <= 0
                               ? 'bg-gray-400 cursor-not-allowed'
                               : 'bg-red-600 hover:bg-red-700'
                           }`}
                         >
-                          {cls.spots <= 0 ? 'Uitverkocht' : 'Inschrijven'}
+                          {cls.availableSpots <= 0 ? 'VOL' : 'Inschrijven'}
                         </Button>
                       </div>
                     </div>
