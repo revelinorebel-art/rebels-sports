@@ -32,6 +32,11 @@ const AdminPage = () => {
 
   // Functie om beschikbare plekken te berekenen
   const getAvailableSpots = (classId, totalSpots) => {
+    // Zorg ervoor dat registrations een array is
+    if (!Array.isArray(registrations)) {
+      return totalSpots;
+    }
+    
     const classRegistrations = registrations.filter(reg => 
       (reg.lesson_id || reg.classId) === classId
     );
@@ -60,6 +65,10 @@ const AdminPage = () => {
         // Update lokale state
         setRegistrations(prev => prev.filter(reg => reg.id !== registrationId));
         
+        // Dispatch event to notify other components about reservation updates
+        window.dispatchEvent(new CustomEvent('reservationsUpdated'));
+        console.log('🔄 AdminPage: Dispatched reservationsUpdated event after deleting individual reservation');
+        
         toast({
           title: "Inschrijving verwijderd",
           description: "De inschrijving is succesvol verwijderd en de plek is weer beschikbaar.",
@@ -86,11 +95,24 @@ const AdminPage = () => {
       } catch (error) {
         console.error("Auth check failed:", error);
         setIsAuthenticated(false);
+      } finally {
+        // Zorg ervoor dat loading altijd wordt gestopt
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
     
-    checkAuth();
+    // Voeg een timeout toe voor het geval de API call te lang duurt
+    const timeoutId = setTimeout(() => {
+      console.warn("Auth check timeout - setting loading to false");
+      setIsLoading(false);
+      setIsAuthenticated(false);
+    }, 5000); // 5 seconden timeout
+    
+    checkAuth().finally(() => {
+      clearTimeout(timeoutId);
+    });
+    
+    return () => clearTimeout(timeoutId);
   }, []);
   
   // Laad lessen uit database
@@ -373,12 +395,127 @@ const AdminPage = () => {
     setActiveTab('add'); // Switch to the add tab for editing
   };
 
+  const handleDeleteAllReservationsForClass = async (classId) => {
+    try {
+      // Find all reservations for this class
+      const classReservations = registrations.filter(reg => 
+        (reg.lesson_id && reg.lesson_id == classId) || 
+        (reg.classId && reg.classId == classId)
+      );
+      
+      if (classReservations.length === 0) {
+        return { success: true };
+      }
+      
+      // Delete all reservations for this class
+      const deletePromises = classReservations.map(reservation => 
+        apiService.deleteReservation(reservation.id)
+      );
+      
+      const results = await Promise.all(deletePromises);
+      const allSuccessful = results.every(result => result.success);
+      
+      if (allSuccessful) {
+        // Update local state
+        setRegistrations(prev => prev.filter(reg => 
+          !((reg.lesson_id && reg.lesson_id == classId) || 
+            (reg.classId && reg.classId == classId))
+        ));
+        return { success: true, deletedCount: classReservations.length };
+      } else {
+        return { success: false, error: "Niet alle reserveringen konden worden verwijderd" };
+      }
+    } catch (error) {
+      console.error('Error deleting reservations for class:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
   const handleDeleteClass = async (classId) => {
-    if (!confirm('Weet je zeker dat je deze les wilt verwijderen?')) {
-      return;
+    try {
+      // First, reload reservations to get the most up-to-date data
+      const reservationsResponse = await apiService.getReservations();
+      let currentReservations = [];
+      
+      if (reservationsResponse.success) {
+        currentReservations = reservationsResponse.data || [];
+        setRegistrations(currentReservations);
+      } else {
+        console.error("Failed to reload reservations:", reservationsResponse.error);
+        currentReservations = registrations; // fallback to current state
+      }
+      
+      // Check if there are reservations for this class
+      const classReservations = currentReservations.filter(reg => 
+        (reg.lesson_id && reg.lesson_id == classId) || 
+        (reg.classId && reg.classId == classId)
+      );
+      
+      let confirmMessage = 'Weet je zeker dat je deze les wilt verwijderen?';
+      if (classReservations.length > 0) {
+        confirmMessage = `Deze les heeft nog ${classReservations.length} reservering(en). Wil je de les én alle reserveringen verwijderen?`;
+      }
+      
+      if (!confirm(confirmMessage)) {
+        return;
+      }
+    } catch (error) {
+      console.error("Error reloading reservations:", error);
+      if (!confirm('Kan reserveringen niet controleren. Wil je de les toch proberen te verwijderen?')) {
+        return;
+      }
     }
 
     try {
+      // Get the current reservations for this class
+      const reservationsResponse = await apiService.getReservations();
+      let currentReservations = [];
+      
+      if (reservationsResponse.success) {
+        currentReservations = reservationsResponse.data || [];
+      }
+      
+      const classReservations = currentReservations.filter(reg => 
+        (reg.lesson_id && reg.lesson_id == classId) || 
+        (reg.classId && reg.classId == classId)
+      );
+      
+      // First, delete all reservations for this class if any exist
+      if (classReservations.length > 0) {
+        console.log(`🗑️ Deleting ${classReservations.length} reservations for lesson ${classId}`);
+        
+        // Delete each reservation individually
+        for (const reservation of classReservations) {
+          try {
+            const deleteResult = await apiService.deleteReservation(reservation.id);
+            if (!deleteResult.success) {
+              console.error(`Failed to delete reservation ${reservation.id}:`, deleteResult.error);
+            } else {
+              console.log(`✅ Deleted reservation ${reservation.id}`);
+            }
+          } catch (error) {
+            console.error(`Error deleting reservation ${reservation.id}:`, error);
+          }
+        }
+        
+        // Update local state
+        setRegistrations(prev => prev.filter(reg => 
+          !((reg.lesson_id && reg.lesson_id == classId) || 
+            (reg.classId && reg.classId == classId))
+        ));
+        
+        // Dispatch event to notify other components about reservation updates
+        window.dispatchEvent(new CustomEvent('reservationsUpdated'));
+        console.log('🔄 AdminPage: Dispatched reservationsUpdated event after deleting reservations');
+        
+        toast({
+          title: "Reserveringen verwijderd",
+          description: `${classReservations.length} reservering(en) zijn verwijderd.`,
+          variant: "default"
+        });
+      }
+      
+      // Now delete the lesson
       const response = await apiService.deleteLesson(classId);
       
       if (response.success) {
@@ -404,17 +541,30 @@ const AdminPage = () => {
           variant: "default"
         });
       } else {
+        // Check if the error is about existing reservations
+        const errorMessage = response.error || "Kan les niet verwijderen.";
+        const isReservationError = errorMessage.includes("reserveringen") || errorMessage.includes("reservations");
+        
         toast({
-          title: "Database fout",
-          description: response.error || "Kan les niet verwijderen.",
+          title: isReservationError ? "Les heeft nog reserveringen" : "Database fout",
+          description: isReservationError 
+            ? "Deze les kan niet worden verwijderd omdat er nog actieve reserveringen zijn. Verwijder eerst alle reserveringen voor deze les."
+            : errorMessage,
           variant: "destructive"
         });
       }
     } catch (error) {
       console.error("Error deleting class:", error);
+      
+      // Check if the error message contains reservation info
+      const errorMessage = error.message || error.toString();
+      const isReservationError = errorMessage.includes("reserveringen") || errorMessage.includes("reservations");
+      
       toast({
-        title: "Database fout",
-        description: "Kan geen verbinding maken met database.",
+        title: isReservationError ? "Les heeft nog reserveringen" : "Database fout",
+        description: isReservationError 
+          ? "Deze les kan niet worden verwijderd omdat er nog actieve reserveringen zijn. Verwijder eerst alle reserveringen voor deze les."
+          : "Kan geen verbinding maken met database.",
         variant: "destructive"
       });
     }
@@ -475,7 +625,7 @@ const AdminPage = () => {
       </div>
     );
   }
-  
+
   return (
     <div className="min-h-screen bg-black text-white pt-20">
       <div className="container mx-auto px-4 py-8">
@@ -494,11 +644,11 @@ const AdminPage = () => {
             Lessen Beheren
           </button>
           <button
-            className={`px-4 py-2 ${activeTab === 'registrations' ? 'text-red-600 border-b-2 border-red-600' : 'text-gray-400'}`}
-            onClick={() => setActiveTab('registrations')}
-          >
-            Inschrijvingen
-          </button>
+              className={`px-4 py-2 ${activeTab === 'registrations' ? 'text-red-600 border-b-2 border-red-600' : 'text-gray-400'}`}
+              onClick={() => setActiveTab('registrations')}
+            >
+              Inschrijvingen
+            </button>
           <button
             className={`px-4 py-2 ${activeTab === 'add' ? 'text-red-600 border-b-2 border-red-600' : 'text-gray-400'}`}
             onClick={() => {
@@ -660,17 +810,25 @@ const AdminPage = () => {
                   Totaal aantal inschrijvingen: {registrations.length}
                 </div>
                 
-                {registrations
-                  .sort((a, b) => new Date(b.registeredAt || b.created_at) - new Date(a.registeredAt || a.created_at))
+                {(Array.isArray(registrations) ? registrations : [])
+                  .sort((a, b) => {
+                    try {
+                      return new Date(b.registeredAt || b.created_at || Date.now()) - new Date(a.registeredAt || a.created_at || Date.now());
+                    } catch (error) {
+                      console.error('Error sorting registrations:', error);
+                      return 0;
+                    }
+                  })
                   .map((registration) => {
-                    const classInfo = getClassInfoForRegistration(registration);
-                    return (
-                      <motion.div
-                        key={registration.id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="bg-zinc-800 rounded-lg p-6 border border-zinc-700"
-                      >
+                    try {
+                      const classInfo = getClassInfoForRegistration(registration) || {};
+                      return (
+                        <motion.div
+                          key={registration.id || Math.random()}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-zinc-800 rounded-lg p-6 border border-zinc-700"
+                        >
                         <div className="flex flex-col md:flex-row md:items-start justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-4 mb-3">
@@ -738,8 +896,16 @@ const AdminPage = () => {
                             </Button>
                           </div>
                         </div>
-                      </motion.div>
-                    );
+                        </motion.div>
+                      );
+                    } catch (error) {
+                      console.error('Error rendering registration:', registration, error);
+                      return (
+                        <div key={registration.id || Math.random()} className="bg-red-900 text-white p-4 rounded">
+                          Error rendering registration: {error.message}
+                        </div>
+                      );
+                    }
                   })}
               </div>
             )}

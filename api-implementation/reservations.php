@@ -66,10 +66,7 @@ function handleGetReservations() {
             $stmt->execute([$lessonId, $date]);
             $count = $stmt->fetch()['count'];
             
-            sendResponse([
-                'reservations' => $reservations,
-                'count' => (int)$count
-            ]);
+            sendResponse($reservations);
             
         } else {
             // Check if lesson_date column exists before using it in ORDER BY
@@ -104,13 +101,7 @@ function handleGetReservations() {
             
             $reservations = $stmt->fetchAll();
             
-            sendResponse([
-                'reservations' => $reservations,
-                'debug_info' => [
-                    'available_columns' => $columnNames,
-                    'has_lesson_date' => in_array('lesson_date', $columnNames)
-                ]
-            ]);
+            sendResponse($reservations);
         }
         
     } catch (PDOException $e) {
@@ -163,20 +154,40 @@ function handleCreateReservation($data) {
             sendError('Je bent al ingeschreven voor deze les op deze datum', 409);
         }
         
-        // Maak de reservering
-        $stmt = $pdo->prepare("
-            INSERT INTO reservations (lesson_id, lesson_date, participant_name, participant_email, participant_phone, notes) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        ");
+        // Check welke kolommen beschikbaar zijn
+        $stmt = $pdo->query("DESCRIBE reservations");
+        $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $columnNames = array_column($columns, 'Field');
         
-        $result = $stmt->execute([
+        // Bouw de INSERT query dynamisch op basis van beschikbare kolommen
+        $baseColumns = ['lesson_id', 'lesson_date', 'participant_name', 'participant_email'];
+        $optionalColumns = [];
+        $values = [
             sanitizeInput($data['lesson_id']),
             $data['lesson_date'],
             sanitizeInput($data['participant_name']),
-            sanitizeInput($data['participant_email']),
-            isset($data['participant_phone']) ? sanitizeInput($data['participant_phone']) : null,
-            isset($data['notes']) ? sanitizeInput($data['notes']) : null
-        ]);
+            sanitizeInput($data['participant_email'])
+        ];
+        
+        // Voeg optionele kolommen toe als ze bestaan
+        if (in_array('participant_phone', $columnNames)) {
+            $optionalColumns[] = 'participant_phone';
+            $values[] = isset($data['participant_phone']) ? sanitizeInput($data['participant_phone']) : null;
+        }
+        
+        if (in_array('notes', $columnNames)) {
+            $optionalColumns[] = 'notes';
+            $values[] = isset($data['notes']) ? sanitizeInput($data['notes']) : null;
+        }
+        
+        $allColumns = array_merge($baseColumns, $optionalColumns);
+        $placeholders = str_repeat('?,', count($allColumns) - 1) . '?';
+        
+        // Maak de reservering
+        $sql = "INSERT INTO reservations (" . implode(', ', $allColumns) . ") VALUES (" . $placeholders . ")";
+        $stmt = $pdo->prepare($sql);
+        
+        $result = $stmt->execute($values);
         
         if ($result) {
             $reservationId = $pdo->lastInsertId();

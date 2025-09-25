@@ -199,51 +199,103 @@ function handleCreateLesson($data) {
             error_log("Added specific_date column to lessons table");
         }
         
-        // Genereer een unieke UUID voor de les
-        $lessonId = generateUUID();
-        
-        $stmt = $pdo->prepare("
-            INSERT INTO lessons (id, title, time, trainer, spots, day_of_week, specific_date, description) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ");
-        
         $dayOfWeek = isset($data['day_of_week']) ? (int)$data['day_of_week'] : null;
         $specificDate = isset($data['specific_date']) && !empty($data['specific_date']) ? $data['specific_date'] : null;
         
         error_log("CREATE LESSON DEBUG: day_of_week = " . var_export($dayOfWeek, true));
         error_log("CREATE LESSON DEBUG: specific_date = " . var_export($specificDate, true));
         
-        $params = [
-            $lessonId,
-            sanitizeInput($data['title']),
-            $data['time'],
-            sanitizeInput($data['trainer']),
-            (int)$data['spots'],
-            $dayOfWeek,
-            $specificDate,
-            isset($data['description']) ? sanitizeInput($data['description']) : ''
-        ];
-        
-        error_log("SQL parameters: " . json_encode($params));
-        
-        $result = $stmt->execute($params);
-        
-        if ($result) {
-            // Verify what was actually inserted
-            $verifyStmt = $pdo->prepare("SELECT id, title, specific_date, day_of_week FROM lessons WHERE id = ?");
-            $verifyStmt->execute([$lessonId]);
-            $insertedLesson = $verifyStmt->fetch(PDO::FETCH_ASSOC);
-            error_log("Inserted lesson verification: " . json_encode($insertedLesson));
+        // Try auto-increment approach first (most common case)
+        try {
+            $stmt = $pdo->prepare("
+                INSERT INTO lessons (title, time, trainer, spots, day_of_week, specific_date, description) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ");
             
-            sendResponse([
-                'success' => true, 
-                'id' => $lessonId, 
-                'message' => 'Les succesvol toegevoegd',
-                'debug_inserted' => $insertedLesson
-            ]);
-        } else {
-            sendError('Fout bij toevoegen les', 500);
+            $params = [
+                sanitizeInput($data['title']),
+                $data['time'],
+                sanitizeInput($data['trainer']),
+                (int)$data['spots'],
+                $dayOfWeek,
+                $specificDate,
+                isset($data['description']) ? sanitizeInput($data['description']) : ''
+            ];
+            
+            error_log("Trying auto-increment INSERT with params: " . json_encode($params));
+            $result = $stmt->execute($params);
+            $lessonId = $pdo->lastInsertId();
+            
+            if ($result && $lessonId) {
+                error_log("Auto-increment INSERT successful, ID: " . $lessonId);
+                
+                // Verify what was actually inserted
+                $verifyStmt = $pdo->prepare("SELECT id, title, specific_date, day_of_week FROM lessons WHERE id = ?");
+                $verifyStmt->execute([$lessonId]);
+                $insertedLesson = $verifyStmt->fetch(PDO::FETCH_ASSOC);
+                error_log("Inserted lesson verification: " . json_encode($insertedLesson));
+                
+                sendResponse([
+                    'success' => true, 
+                    'id' => $lessonId, 
+                    'message' => 'Les succesvol toegevoegd',
+                    'debug_inserted' => $insertedLesson,
+                    'debug_id_type' => 'auto_increment'
+                ]);
+                return;
+            }
+        } catch (PDOException $autoIncrementError) {
+            error_log("Auto-increment failed: " . $autoIncrementError->getMessage());
+            
+            // If auto-increment fails, try UUID approach
+            try {
+                $lessonId = generateUUID();
+                
+                $stmt = $pdo->prepare("
+                    INSERT INTO lessons (id, title, time, trainer, spots, day_of_week, specific_date, description) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                
+                $params = [
+                    $lessonId,
+                    sanitizeInput($data['title']),
+                    $data['time'],
+                    sanitizeInput($data['trainer']),
+                    (int)$data['spots'],
+                    $dayOfWeek,
+                    $specificDate,
+                    isset($data['description']) ? sanitizeInput($data['description']) : ''
+                ];
+                
+                error_log("Trying UUID INSERT with params: " . json_encode($params));
+                $result = $stmt->execute($params);
+                
+                if ($result) {
+                    error_log("UUID INSERT successful, ID: " . $lessonId);
+                    
+                    // Verify what was actually inserted
+                    $verifyStmt = $pdo->prepare("SELECT id, title, specific_date, day_of_week FROM lessons WHERE id = ?");
+                    $verifyStmt->execute([$lessonId]);
+                    $insertedLesson = $verifyStmt->fetch(PDO::FETCH_ASSOC);
+                    error_log("Inserted lesson verification: " . json_encode($insertedLesson));
+                    
+                    sendResponse([
+                        'success' => true, 
+                        'id' => $lessonId, 
+                        'message' => 'Les succesvol toegevoegd',
+                        'debug_inserted' => $insertedLesson,
+                        'debug_id_type' => 'uuid'
+                    ]);
+                    return;
+                }
+            } catch (PDOException $uuidError) {
+                error_log("UUID INSERT also failed: " . $uuidError->getMessage());
+                throw $uuidError; // Re-throw to be caught by outer catch
+            }
         }
+        
+        // If we get here, both methods failed
+        sendError('Fout bij toevoegen les', 500);
         
     } catch (PDOException $e) {
         error_log("Database error in handleCreateLesson: " . $e->getMessage());
