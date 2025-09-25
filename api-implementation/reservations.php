@@ -33,6 +33,14 @@ function handleGetReservations() {
     $date = isset($_GET['date']) ? sanitizeInput($_GET['date']) : null;
     
     try {
+        // First, check if reservations table exists and has the right structure
+        $stmt = $pdo->query("DESCRIBE reservations");
+        $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $columnNames = array_column($columns, 'Field');
+        
+        // Log available columns for debugging
+        error_log("Available columns in reservations table: " . implode(', ', $columnNames));
+        
         if ($lessonId && $date) {
             // Haal reserveringen voor specifieke les en datum
             $stmt = $pdo->prepare("
@@ -64,25 +72,49 @@ function handleGetReservations() {
             ]);
             
         } else {
-            // Haal alle reserveringen (voor admin overzicht)
-            $stmt = $pdo->query("
-                SELECT 
-                    r.*,
-                    l.title as lesson_title,
-                    l.time as lesson_time,
-                    l.trainer as lesson_trainer,
-                    l.day_of_week
-                FROM reservations r
-                JOIN lessons l ON r.lesson_id = l.id
-                WHERE 1=1
-                ORDER BY r.lesson_date DESC, l.time
-            ");
+            // Check if lesson_date column exists before using it in ORDER BY
+            if (in_array('lesson_date', $columnNames)) {
+                // Haal alle reserveringen (voor admin overzicht) - with lesson_date
+                $stmt = $pdo->query("
+                    SELECT 
+                        r.*,
+                        l.title as lesson_title,
+                        l.time as lesson_time,
+                        l.trainer as lesson_trainer,
+                        l.day_of_week
+                    FROM reservations r
+                    JOIN lessons l ON r.lesson_id = l.id
+                    ORDER BY r.lesson_date DESC, l.time
+                ");
+            } else {
+                // Fallback: order by created_at if lesson_date doesn't exist
+                error_log("lesson_date column not found, using created_at for ordering");
+                $stmt = $pdo->query("
+                    SELECT 
+                        r.*,
+                        l.title as lesson_title,
+                        l.time as lesson_time,
+                        l.trainer as lesson_trainer,
+                        l.day_of_week
+                    FROM reservations r
+                    JOIN lessons l ON r.lesson_id = l.id
+                    ORDER BY r.created_at DESC, l.time
+                ");
+            }
+            
             $reservations = $stmt->fetchAll();
             
-            sendResponse($reservations);
+            sendResponse([
+                'reservations' => $reservations,
+                'debug_info' => [
+                    'available_columns' => $columnNames,
+                    'has_lesson_date' => in_array('lesson_date', $columnNames)
+                ]
+            ]);
         }
         
     } catch (PDOException $e) {
+        error_log("Database error in handleGetReservations: " . $e->getMessage());
         sendError('Fout bij ophalen reserveringen: ' . $e->getMessage(), 500);
     }
 }
