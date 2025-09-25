@@ -44,30 +44,76 @@ const GroepslessenPage = () => {
 
   // Functie om lessen te laden/herladen
   const loadClasses = async () => {
+    console.log('📚 GroepslessenPage: Laden van lessen gestart...');
+    
+    // Mock data voor testing
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    
+    const mockClasses = [
+      {
+        id: 1,
+        title: 'Test Kickboksen',
+        name: 'Test Kickboksen',
+        trainer: 'Test Trainer',
+        time: '18:00 - 19:00',
+        spots: 10,
+        description: 'Test les voor debugging',
+        specific_date: today.toISOString().split('T')[0],
+        date: today.toISOString().split('T')[0]
+      },
+      {
+        id: 2,
+        title: 'Test Boxing',
+        name: 'Test Boxing',
+        trainer: 'Test Trainer 2',
+        time: '19:00 - 20:00',
+        spots: 8,
+        description: 'Test les voor debugging',
+        specific_date: tomorrow.toISOString().split('T')[0],
+        date: tomorrow.toISOString().split('T')[0]
+      }
+    ];
+    
+    // Production: gebruik normale API calls met fallback naar mock data bij failures
+    
     try {
       const response = await apiService.getLessons();
       
-      if (response.success) {
+      console.log('API response for lessons:', response);
+      
+      if (response.success && response.data) {
         // Converteer database format naar frontend format
         const formattedClasses = response.data.map(lesson => 
           apiService.formatLessonForFrontend(lesson)
         );
+
         setClasses(formattedClasses);
+        
+        // Trigger een custom event om andere componenten te informeren
+        window.dispatchEvent(new CustomEvent('lessonsLoaded', { 
+          detail: { lessons: formattedClasses } 
+        }));
       } else {
-        console.error("Failed to load classes:", response.error);
-        setClasses([]);
+        console.log('Geen lessen in database of API fout:', response.error);
+
+        setClasses(mockClasses);
+        
         toast({
           title: "Database fout",
-          description: "Kon lessen niet laden uit database.",
+          description: "Kon lessen niet laden uit database. Test data geladen.",
           variant: "destructive"
         });
       }
     } catch (error) {
       console.error("Failed to load classes from database:", error);
-      setClasses([]);
+
+      setClasses(mockClasses);
+      
       toast({
         title: "Verbindingsfout",
-        description: "Kon geen verbinding maken met de database.",
+        description: "Kon geen verbinding maken met de database. Test data geladen.",
         variant: "destructive"
       });
     }
@@ -109,9 +155,11 @@ const GroepslessenPage = () => {
 
   // Real-time synchronisatie met event listeners
   useEffect(() => {
-    const handleLessonsUpdated = () => {
-      console.log('Lessen bijgewerkt - synchroniseren frontend weekrooster');
+    const handleLessonsUpdated = (event) => {
+      console.log('📅 GroepslessenPage: lessonsUpdated event ontvangen - synchroniseren frontend weekrooster');
+      console.log('Event details:', event.detail);
       loadClasses();
+      loadReservations(); // Ook reserveringen herladen voor accurate capaciteit
     };
 
     const handleReservationsUpdated = () => {
@@ -119,15 +167,59 @@ const GroepslessenPage = () => {
       loadReservations();
     };
 
+    // localStorage event listener voor cross-page synchronisatie
+    const handleStorageChange = (e) => {
+      if (e.key === 'classes' || e.key === 'lessonsLastUpdated') {
+        console.log('📅 GroepslessenPage: localStorage lessonsLastUpdated gedetecteerd - synchroniseren');
+        console.log('Storage event:', e);
+        loadClasses();
+        loadReservations();
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        console.log('📅 GroepslessenPage: Page became visible, reload data');
+        loadClasses();
+      }
+    };
+
+    const handleFocus = () => {
+      console.log('📅 GroepslessenPage: Window focused, reload data');
+      loadClasses();
+    };
+
+    // Interval-based synchronisatie als backup
+    const syncInterval = setInterval(() => {
+      const lastUpdated = localStorage.getItem('lessonsLastUpdated');
+      const lastCheck = localStorage.getItem('groepslessenLastCheck') || '0';
+      
+      if (lastUpdated && parseInt(lastUpdated) > parseInt(lastCheck)) {
+        console.log('📅 GroepslessenPage: Interval sync detecteert lesson update - synchroniseren');
+        loadClasses();
+        loadReservations();
+        localStorage.setItem('groepslessenLastCheck', Date.now().toString());
+      }
+    }, 15000); // Check elke 15 seconden
+
     // Luister naar custom events van de mock data store
     window.addEventListener('lessonsUpdated', handleLessonsUpdated);
     window.addEventListener('reservationsUpdated', handleReservationsUpdated);
+    window.addEventListener('storage', handleStorageChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
 
     return () => {
       window.removeEventListener('lessonsUpdated', handleLessonsUpdated);
       window.removeEventListener('reservationsUpdated', handleReservationsUpdated);
+      window.removeEventListener('storage', handleStorageChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(syncInterval);
     };
   }, []);
+
+
 
   // Dagen van de week
   const dayNames = [
@@ -161,37 +253,37 @@ const GroepslessenPage = () => {
 
   const weekDates = getWeekDates();
 
-  // Genereer lessen voor de geselecteerde dag (herhalend voor elke week)
+  // Toon alleen lessen met specifieke datum (geen herhalende lessen)
   const getClassesForSelectedDay = () => {
     const selectedDate = weekDates.find(d => d.value === selectedDay)?.fullDate;
     if (!selectedDate) return [];
 
     const dateString = selectedDate.toISOString().split('T')[0];
-
-    // Filter lessen op basis van geselecteerde dag van de week (herhalende lessen)
-    const dayClasses = classes.filter(cls => cls.day === selectedDay);
     
-    // Filter lessen met specifieke datum die overeenkomt met de geselecteerde datum
-    const specificDateClasses = classes.filter(cls => 
-      cls.specific_date === dateString && !cls.day
-    );
-    
-    // Combineer herhalende lessen en specifieke datum lessen
-    const allClasses = [...dayClasses, ...specificDateClasses];
-    
-    // Genereer unieke lessen voor deze specifieke datum
-    return allClasses.map(cls => {
-      const dateSpecificId = cls.specific_date ? cls.id : `${cls.id}-${dateString}`;
+    // Filter alleen lessen met specifieke datum die overeenkomt met de geselecteerde datum
+    const specificDateClasses = classes.filter(cls => {
+      const lessonDate = cls.specific_date || cls.date;
       
+      if (lessonDate === dateString) {
+        return true;
+      }
+      // Extra check voor datum format variaties
+      if (lessonDate) {
+        const normalizedLessonDate = new Date(lessonDate).toISOString().split('T')[0];
+        return normalizedLessonDate === dateString;
+      }
+      return false;
+    });
+    
+    // Return lessen voor deze specifieke datum
+    return specificDateClasses.map(cls => {
       // Bereken beschikbare plekken op basis van reserveringen
-      // Gebruik dezelfde key format als in loadReservations: lessonId-lessonDate
       const reservationKey = `${cls.id}-${dateString}`;
       const reservedSpots = reservations[reservationKey] || 0;
       const availableSpots = Math.max(0, cls.spots - reservedSpots);
       
       return {
         ...cls,
-        id: dateSpecificId, // Unieke ID per datum
         originalId: cls.id, // Bewaar originele ID
         date: dateString, // Voeg datum toe
         availableSpots: availableSpots, // Beschikbare plekken

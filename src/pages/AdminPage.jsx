@@ -280,6 +280,8 @@ const AdminPage = () => {
         id: editingClass ? editingClass.id : uuidv4()
       });
 
+      console.log('Formatted data for API:', lessonData);
+
       let response;
       if (editingClass) {
         response = await apiService.updateLesson(editingClass.id, lessonData);
@@ -287,7 +289,44 @@ const AdminPage = () => {
         response = await apiService.createLesson(lessonData);
       }
 
+      console.log('API response:', response);
+
       if (response.success) {
+        // Herlaad lessen uit database om de UI bij te werken
+        try {
+          const lessonsResponse = await apiService.getLessons();
+          if (lessonsResponse.success) {
+            const formattedClasses = lessonsResponse.data.map(lesson => 
+              apiService.formatLessonForFrontend(lesson)
+            );
+            setClasses(formattedClasses);
+            
+            // Verstuur event om andere componenten te informeren over de update
+            console.log('🔄 AdminPage: Dispatching lessonsUpdated event na les opslaan');
+            window.dispatchEvent(new CustomEvent('lessonsUpdated', {
+              detail: { action: 'saved', lesson: lessonData }
+            }));
+            
+            // Ook localStorage event voor cross-page synchronisatie
+            localStorage.setItem('lessonsLastUpdated', Date.now().toString());
+            localStorage.setItem('classes', JSON.stringify(lessonsResponse.data));
+            
+            // Trigger localStorage event voor andere tabs
+            window.dispatchEvent(new StorageEvent('storage', {
+              key: 'classes',
+              newValue: JSON.stringify(lessonsResponse.data)
+            }));
+            
+            // Extra synchronisatie trigger voor cross-page updates
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('lessonsUpdated'));
+              console.log('🔄 AdminPage: Extra lessonsUpdated event verzonden voor synchronisatie');
+            }, 100);
+          }
+        } catch (error) {
+          console.error("Error reloading classes:", error);
+        }
+
         setActiveTab('classes'); // Return to classes tab after saving
         setEditingClass(null);
         setFormData({
@@ -335,10 +374,30 @@ const AdminPage = () => {
   };
 
   const handleDeleteClass = async (classId) => {
+    if (!confirm('Weet je zeker dat je deze les wilt verwijderen?')) {
+      return;
+    }
+
     try {
       const response = await apiService.deleteLesson(classId);
       
       if (response.success) {
+        // Update lokale state - verwijder de les uit de lijst
+        setClasses(prev => prev.filter(cls => cls.id !== classId));
+        
+        // Verstuur event om andere componenten te informeren over de verwijdering
+        console.log('🗑️ AdminPage: Dispatching lessonsUpdated event na les verwijderen');
+        window.dispatchEvent(new CustomEvent('lessonsUpdated'));
+        
+        // Ook localStorage event voor cross-page synchronisatie
+        localStorage.setItem('lessonsLastUpdated', Date.now().toString());
+        
+        // Extra synchronisatie trigger voor cross-page updates
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('lessonsUpdated'));
+          console.log('🗑️ AdminPage: Extra lessonsUpdated event verzonden na verwijderen');
+        }, 100);
+        
         toast({
           title: "Les verwijderd",
           description: "De les is succesvol verwijderd.",

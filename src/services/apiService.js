@@ -1,189 +1,23 @@
 // API Service voor Rebels Sports
 // Vervangt localStorage calls met database API calls
 
-const API_BASE = 'http://localhost:8080';
+// Force HTTPS API URL for production to prevent 301 redirects
+const API_BASE = 'https://red-seal-316406.hostingersite.com/api-implementation';
 
-// Mock data store voor persistente data tijdens ontwikkeling
-class MockDataStore {
-  constructor() {
-    this.initializeData();
-  }
+// Productie configuratie - altijd live API gebruiken
+const isDevelopment = false;
+const isLocalhost = false;
 
-  initializeData() {
-    // Initialiseer lessen als ze nog niet bestaan
-    if (!localStorage.getItem('mockLessons')) {
-      const initialLessons = [
-        {
-          id: 1,
-          title: 'Kickboksen Beginners',
-          time: '18:00',
-          trainer: 'Mike Johnson',
-          spots: 15,
-          day_of_week: 1,
-          specific_date: null,
-          description: 'Perfecte les voor beginners in kickboksen. Leer de basis technieken en verbeter je conditie.',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        },
-        {
-          id: 2,
-          title: 'CrossFit Advanced',
-          time: '19:30',
-          trainer: 'Sarah Wilson',
-          spots: 12,
-          day_of_week: 2,
-          specific_date: null,
-          description: 'Intensieve CrossFit training voor gevorderden. Uitdagende workouts en functionele bewegingen.',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        },
-        {
-          id: 3,
-          title: 'Yoga Flow',
-          time: '10:30',
-          trainer: 'Emma Davis',
-          spots: 20,
-          day_of_week: 3,
-          specific_date: null,
-          description: 'Ontspannende yoga sessie met focus op flexibiliteit en mindfulness.',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }
-      ];
-      localStorage.setItem('mockLessons', JSON.stringify(initialLessons));
-    }
 
-    // Initialiseer reserveringen als ze nog niet bestaan
-    if (!localStorage.getItem('mockReservations')) {
-      localStorage.setItem('mockReservations', JSON.stringify([]));
-    }
-  }
-
-  getLessons() {
-    return JSON.parse(localStorage.getItem('mockLessons') || '[]');
-  }
-
-  saveLessons(lessons) {
-    localStorage.setItem('mockLessons', JSON.stringify(lessons));
-    // Trigger een custom event voor real-time synchronisatie
-    window.dispatchEvent(new CustomEvent('lessonsUpdated', { detail: lessons }));
-  }
-
-  getReservations() {
-    return JSON.parse(localStorage.getItem('mockReservations') || '[]');
-  }
-
-  saveReservations(reservations) {
-    localStorage.setItem('mockReservations', JSON.stringify(reservations));
-    // Trigger een custom event voor real-time synchronisatie
-    window.dispatchEvent(new CustomEvent('reservationsUpdated', { detail: reservations }));
-  }
-
-  addLesson(lesson) {
-    const lessons = this.getLessons();
-    const newLesson = {
-      ...lesson,
-      id: Date.now(), // Gebruik timestamp als unieke ID
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    lessons.push(newLesson);
-    this.saveLessons(lessons);
-    return newLesson;
-  }
-
-  updateLesson(id, lessonData) {
-    const lessons = this.getLessons();
-    const index = lessons.findIndex(lesson => lesson.id == id);
-    if (index !== -1) {
-      lessons[index] = {
-        ...lessons[index],
-        ...lessonData,
-        updated_at: new Date().toISOString()
-      };
-      this.saveLessons(lessons);
-      return lessons[index];
-    }
-    return null;
-  }
-
-  deleteLesson(id) {
-    const lessons = this.getLessons();
-    const filteredLessons = lessons.filter(lesson => lesson.id != id);
-    this.saveLessons(filteredLessons);
-    
-    // Verwijder ook gerelateerde reserveringen
-    const reservations = this.getReservations();
-    const filteredReservations = reservations.filter(res => res.classId != id);
-    this.saveReservations(filteredReservations);
-    
-    return true;
-  }
-
-  addReservation(reservation) {
-    const reservations = this.getReservations();
-    const lessons = this.getLessons();
-    
-    // Zoek de les om capaciteit te controleren
-    const lesson = lessons.find(l => l.id === reservation.lesson_id);
-    if (!lesson) {
-      throw new Error('Les niet gevonden');
-    }
-    
-    // Tel huidige reserveringen voor deze les en datum
-    const existingReservations = reservations.filter(r => 
-      r.lesson_id === reservation.lesson_id && 
-      r.lesson_date === reservation.lesson_date
-    );
-    
-    // Controleer of er nog plek is
-    if (existingReservations.length >= lesson.spots) {
-      throw new Error('Deze les is vol');
-    }
-    
-    const newReservation = {
-      ...reservation,
-      id: Date.now(),
-      created_at: new Date().toISOString()
-    };
-    reservations.push(newReservation);
-    this.saveReservations(reservations);
-    
-    // Trigger event voor real-time synchronisatie
-    window.dispatchEvent(new CustomEvent('reservationsUpdated'));
-    
-    return newReservation;
-  }
-
-  deleteReservation(id) {
-    const reservations = this.getReservations();
-    const filteredReservations = reservations.filter(res => res.id != id);
-    this.saveReservations(filteredReservations);
-    
-    // Trigger event voor real-time synchronisatie
-    window.dispatchEvent(new CustomEvent('reservationsUpdated'));
-    
-    return true;
-  }
-
-  clearAllData() {
-    localStorage.removeItem('mockLessons');
-    localStorage.removeItem('mockReservations');
-    this.initializeData();
-  }
-}
-
-const mockDataStore = new MockDataStore();
 
 class ApiService {
   constructor() {
-    this.baseURL = API_BASE;
-    this.mockStore = mockDataStore;
+    this.baseUrl = API_BASE;
   }
 
   // Helper method voor API calls
   async makeRequest(endpoint, options = {}) {
-    const url = `${this.baseUrl}/${endpoint}`;
+    const url = `${this.baseUrl}${endpoint}`;
     
     const defaultOptions = {
       headers: {
@@ -241,96 +75,152 @@ class ApiService {
   // ===== LESSEN API =====
   
   async getLessons() {
-    // Gebruik persistente mock data store
-    console.log('Ophalen van lessen uit mock data store');
+    console.log('Ophalen van lessen uit database via API...');
     
-    const lessons = this.mockStore.getLessons();
+    const response = await this.makeRequest('/lessons.php', {
+      method: 'GET'
+    });
     
-    return {
-      success: true,
-      data: lessons,
-      error: null
-    };
+    if (response.success && response.data) {
+      // Handle different response formats from the API
+      let lessonsArray = [];
+      
+      if (response.data.lessons && Array.isArray(response.data.lessons)) {
+        // API returns lessons in a 'lessons' property
+        lessonsArray = response.data.lessons;
+      } else if (Array.isArray(response.data)) {
+        // API returns lessons directly as array
+        lessonsArray = response.data;
+      } else if (response.data.value && Array.isArray(response.data.value)) {
+        // API returns lessons in a 'value' property
+        lessonsArray = response.data.value;
+      }
+      
+      // Converteer database format naar frontend format
+      const lessons = lessonsArray.map(lesson => this.formatLessonForFrontend(lesson));
+      
+      console.log(`${lessons.length} lessen opgehaald uit database`);
+      console.log('Raw API response:', response.data);
+      console.log('Formatted lessons:', lessons);
+      
+      return {
+        success: true,
+        data: lessons,
+        error: null
+      };
+    } else {
+      console.error('API response error:', response);
+      return {
+        success: false,
+        error: response.error || 'Fout bij ophalen lessen uit database',
+        data: []
+      };
+    }
   }
 
   async createLesson(lessonData) {
-    // Gebruik mock data store voor persistente opslag
-    console.log('Toevoegen van les aan mock data store', lessonData);
+    console.log('Toevoegen van les aan database', lessonData);
     
-    try {
-      const newLesson = this.mockStore.addLesson(lessonData);
+    // Converteer frontend format naar database format
+    const dbLesson = this.formatLessonForDatabase(lessonData);
+    
+    const response = await this.makeRequest('/lessons.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(dbLesson)
+    });
+    
+    if (response.success) {
+      // Converteer terug naar frontend format
+      const newLesson = this.formatLessonForFrontend({
+        ...dbLesson,
+        id: response.id
+      });
       
       return {
         success: true,
         data: newLesson,
         error: null
       };
-    } catch (error) {
-      console.error('Fout bij toevoegen van les:', error);
+    } else {
       return {
         success: false,
-        data: null,
-        error: 'Kon les niet toevoegen'
+        error: response.error || 'Fout bij toevoegen les',
+        data: null
       };
     }
   }
 
   async updateLesson(lessonId, lessonData) {
-    // Gebruik mock data store voor persistente opslag
-    console.log('Bijwerken van les in mock data store', lessonId, lessonData);
-    
     try {
-      const updatedLesson = this.mockStore.updateLesson(lessonId, lessonData);
+      console.log('Bijwerken van les in database', lessonId, lessonData);
       
-      if (updatedLesson) {
+      // Converteer frontend format naar database format
+      const dbLesson = this.formatLessonForDatabase({
+        ...lessonData,
+        id: lessonId
+      });
+      
+      const response = await this.makeRequest('/lessons.php', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(dbLesson)
+      });
+      
+      if (response.success) {
+        // Converteer terug naar frontend format
+        const updatedLesson = this.formatLessonForFrontend({
+          ...dbLesson,
+          id: lessonId
+        });
+        
         return {
           success: true,
           data: updatedLesson,
           error: null
         };
       } else {
-        return {
-          success: false,
-          data: null,
-          error: 'Les niet gevonden'
-        };
+        throw new Error(response.error || 'Fout bij bijwerken les');
       }
     } catch (error) {
       console.error('Fout bij bijwerken van les:', error);
+      
       return {
         success: false,
         data: null,
-        error: 'Kon les niet bijwerken'
+        error: error.message || 'Fout bij bijwerken van les'
       };
     }
   }
 
   async deleteLesson(lessonId) {
-    // Gebruik mock data store voor persistente opslag
-    console.log('Verwijderen van les uit mock data store', lessonId);
-    
     try {
-      const success = this.mockStore.deleteLesson(lessonId);
+      console.log('Verwijderen van les uit database', lessonId);
       
-      if (success) {
+      const response = await this.makeRequest(`/lessons.php?id=${lessonId}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.success) {
         return {
           success: true,
           data: { message: 'Les succesvol verwijderd' },
           error: null
         };
       } else {
-        return {
-          success: false,
-          data: null,
-          error: 'Les niet gevonden'
-        };
+        throw new Error(response.error || 'Fout bij verwijderen les');
       }
     } catch (error) {
       console.error('Fout bij verwijderen van les:', error);
+      
       return {
         success: false,
         data: null,
-        error: 'Kon les niet verwijderen'
+        error: error.message || 'Fout bij verwijderen van les'
       };
     }
   }
@@ -338,85 +228,100 @@ class ApiService {
   // ===== RESERVERINGEN API =====
   
   async getReservations(lessonId = null, date = null) {
-    // Gebruik mock data store voor persistente opslag
-    console.log('Ophalen van reserveringen uit mock data store', { lessonId, date });
-    
     try {
-      let reservations = this.mockStore.getReservations();
+      console.log('Ophalen van reserveringen uit database', { lessonId, date });
       
-      // Filter op lessonId als opgegeven
-      if (lessonId) {
-        reservations = reservations.filter(res => res.lesson_id == lessonId);
+      // Bouw query parameters
+      const params = new URLSearchParams();
+      if (lessonId) params.append('lesson_id', lessonId);
+      if (date) params.append('date', date);
+      
+      const queryString = params.toString();
+      const endpoint = `/reservations.php${queryString ? '?' + queryString : ''}`;
+      
+      const response = await this.makeRequest(endpoint, {
+        method: 'GET'
+      });
+      
+      if (response.success) {
+        return {
+          success: true,
+          data: response.data || response.reservations || [],
+          error: null
+        };
+      } else {
+        throw new Error(response.error || 'Fout bij ophalen reserveringen');
       }
-      
-      // Filter op datum als opgegeven
-      if (date) {
-        reservations = reservations.filter(res => res.lesson_date === date);
-      }
-      
-      return {
-        success: true,
-        data: reservations,
-        error: null
-      };
     } catch (error) {
       console.error('Fout bij ophalen van reserveringen:', error);
+      
       return {
         success: false,
         data: [],
-        error: 'Kon reserveringen niet ophalen'
+        error: error.message || 'Fout bij ophalen van reserveringen'
       };
     }
   }
 
   async createReservation(reservationData) {
-    // Gebruik mock data store voor persistente opslag
-    console.log('Toevoegen van reservering aan mock data store', reservationData);
-    
     try {
-      const newReservation = this.mockStore.addReservation(reservationData);
+      console.log('Toevoegen van reservering aan database', reservationData);
       
-      return {
-        success: true,
-        data: newReservation,
-        error: null
-      };
+      // Converteer frontend format naar database format
+      const dbReservation = this.formatReservationForDatabase(reservationData);
+      
+      const response = await this.makeRequest('/reservations.php', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(dbReservation)
+      });
+      
+      if (response.success) {
+        return {
+          success: true,
+          data: response.data || dbReservation,
+          error: null
+        };
+      } else {
+        throw new Error(response.error || 'Fout bij toevoegen reservering');
+      }
     } catch (error) {
       console.error('Fout bij toevoegen van reservering:', error);
+      
       return {
         success: false,
         data: null,
-        error: error.message || 'Kon reservering niet toevoegen'
+        error: error.message || 'Fout bij toevoegen van reservering'
       };
     }
   }
 
   async deleteReservation(reservationId) {
-    // Gebruik mock data store voor persistente opslag
-    console.log('Verwijderen van reservering uit mock data store', reservationId);
-    
     try {
-      const success = this.mockStore.deleteReservation(reservationId);
+      console.log('Verwijderen van reservering uit database', reservationId);
       
-      if (success) {
+      const response = await this.makeRequest(`/reservations.php?id=${reservationId}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.success) {
         return {
           success: true,
           data: { message: 'Reservering succesvol verwijderd' },
           error: null
         };
       } else {
-        return {
-          success: false,
-          data: null,
-          error: 'Reservering niet gevonden'
-        };
+        throw new Error(response.error || 'Fout bij verwijderen reservering');
       }
     } catch (error) {
       console.error('Fout bij verwijderen van reservering:', error);
+      
       return {
         success: false,
         data: null,
-        error: 'Kon reservering niet verwijderen'
+        error: error.message || 'Fout bij verwijderen van reservering'
       };
     }
   }
@@ -430,35 +335,41 @@ class ApiService {
   // ===== ADMIN API =====
   
   async adminLogin(username, password) {
-    // Mock implementatie voor lokale ontwikkeling
-    console.log('Mock: Admin login attempt', username);
+    console.log('Admin login attempt:', username);
     
-    if (username === 'admin' && password === 'admin123') {
-      const mockToken = 'mock-admin-token-' + Date.now();
-      localStorage.setItem('adminToken', mockToken);
+    const response = await this.makeRequest('/admin.php?action=login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password })
+    });
+    
+    if (response.success && response.data) {
+      // Sla het token op in localStorage (backend geeft session_token terug)
+      if (response.data.session_token) {
+        localStorage.setItem('adminToken', response.data.session_token);
+      }
+      
       return {
         success: true,
-        data: { 
-          token: mockToken,
-          message: 'Succesvol ingelogd',
-          admin: { username: 'admin', id: 1, email: 'admin@rebelssports.nl' }
-        },
+        data: response.data,
         error: null
       };
     } else {
       return {
         success: false,
-        error: 'Ongeldige inloggegevens',
+        error: response.error || 'Inloggen mislukt',
         data: null
       };
     }
   }
 
   async adminLogout() {
-    // Mock implementatie voor lokale ontwikkeling
-    console.log('Mock: Admin logout');
+    console.log('Admin logout');
     
-    // Verwijder het token uit localStorage
+    const response = await this.makeRequest('/admin.php?action=logout', {
+      method: 'POST'
+    });
+    
+    // Verwijder het token uit localStorage ongeacht de API response
     localStorage.removeItem('adminToken');
     
     return {
@@ -474,42 +385,60 @@ class ApiService {
       return { success: false, error: 'Geen token gevonden' };
     }
 
-    // Mock implementatie voor lokale ontwikkeling
-    console.log('Mock: Verifying admin token', token);
+    console.log('Verifying admin token');
     
-    // Simuleer een succesvolle verificatie
-    return {
-      success: true,
-      data: {
-        valid: true,
-        admin: {
-          id: 1,
-          username: 'admin',
-          email: 'admin@rebelssports.nl'
-        }
-      },
-      error: null
-    };
+    const response = await this.makeRequest('/admin.php?action=verify', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    if (response.success && response.data) {
+      return {
+        success: true,
+        data: response.data,
+        error: null
+      };
+    } else {
+      // Token is ongeldig, verwijder het
+      localStorage.removeItem('adminToken');
+      return {
+        success: false,
+        error: response.error || 'Token verificatie mislukt',
+        data: null
+      };
+    }
   }
 
   // Functie om alle data te wissen voor testing
   async clearAllData() {
-    console.log('Wissen van alle mock data voor testing');
+    console.log('Wissen van alle data uit database');
     
     try {
-      this.mockStore.clearAllData();
+      // Voor productie: implementeer database clear functionaliteit
+      const response = await this.makeRequest('/clear-data.php', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
       
-      return {
-        success: true,
-        data: { message: 'Alle data succesvol gewist' },
-        error: null
-      };
+      if (response.success) {
+        return {
+          success: true,
+          data: { message: 'Alle data succesvol gewist' },
+          error: null
+        };
+      } else {
+        throw new Error(response.error || 'Fout bij wissen van data');
+      }
     } catch (error) {
       console.error('Fout bij wissen van data:', error);
       return {
         success: false,
         data: null,
-        error: 'Kon data niet wissen'
+        error: error.message || 'Kon data niet wissen'
       };
     }
   }
@@ -520,22 +449,23 @@ class ApiService {
       return { success: false, error: 'Geen token gevonden' };
     }
 
-    // Mock implementatie voor lokale ontwikkeling
-    console.log('Mock: Verifying admin token', token);
-    
-    // Simuleer een succesvolle verificatie
-    return {
-      success: true,
-      data: {
-        valid: true,
-        admin: {
-          id: 1,
-          username: 'admin',
-          email: 'admin@rebelssports.nl'
+    try {
+      const response = await this.makeRequest('/admin.php?action=verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         }
-      },
-      error: null
-    };
+      });
+      
+      return response;
+    } catch (error) {
+      console.error('Fout bij verificatie admin token:', error);
+      return {
+        success: false,
+        error: error.message || 'Fout bij verificatie'
+      };
+    }
   }
 
   async getDashboardData() {
@@ -546,62 +476,68 @@ class ApiService {
   
   // Converteer frontend lesson format naar database format
   formatLessonForDatabase(lesson) {
+    console.log('Formatting lesson for database:', lesson);
+    
     // Bereken de dag van de week uit de specifieke datum als die beschikbaar is
-    let dayOfWeek = 0;
+    let dayOfWeek = 1;
     if (lesson.date) {
       const date = new Date(lesson.date);
-      dayOfWeek = date.getDay(); // 0 = Zondag, 1 = Maandag, etc.
+      const jsDay = date.getDay(); // 0 = Zondag, 1 = Maandag, etc.
+      dayOfWeek = jsDay === 0 ? 7 : jsDay; // Converteer naar 1-7 systeem (Maandag=1, Zondag=7)
     } else if (lesson.day !== undefined && lesson.day !== null) {
       dayOfWeek = parseInt(lesson.day);
     }
     
-    // Zorg ervoor dat dayOfWeek altijd een geldige waarde heeft (0-6)
-    if (isNaN(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) {
-      dayOfWeek = 0; // Default to Sunday (0)
+    // Zorg ervoor dat dayOfWeek altijd een geldige waarde heeft (1-7)
+    if (isNaN(dayOfWeek) || dayOfWeek < 1 || dayOfWeek > 7) {
+      dayOfWeek = 1; // Default to Monday (1)
     }
     
     const result = {
-      id: lesson.id,
+      id: lesson.id || this.generateUUID(),
       title: lesson.name || lesson.title, // Ondersteun beide veldnamen
       trainer: lesson.trainer,
       time: lesson.time,
       spots: parseInt(lesson.spots) || 15,
       day_of_week: dayOfWeek, // Gebruik de berekende dag van de week
-      specific_date: lesson.date || null, // Gebruik de specifieke datum
+      specific_date: lesson.date || lesson.specific_date || null, // Gebruik de specifieke datum
       description: lesson.description || '',
     };
     
     console.log(`[DATE-BASED LESSON] Saving lesson for date: ${lesson.date}, day: ${dayOfWeek}`);
     console.log('Formatting lesson for database:', lesson, 'Day:', dayOfWeek, 'Date:', lesson.date);
-    console.log('Formatted lesson for database:', result);
+    console.log('Formatted for database:', result);
     
     return result;
   }
 
   // Converteer database lesson format naar frontend format
   formatLessonForFrontend(lesson) {
+    console.log('Formatting lesson for frontend:', lesson);
     console.log('[FORMAT LESSON] Received lesson from database:', lesson);
     
     // Zorg ervoor dat we de juiste veldnamen gebruiken
     const name = lesson.name || lesson.title;
     const specificDate = lesson.specific_date || lesson.date;
     
-    // Bereken de dag van de week uit de specifieke datum
-    let dayValue = null;
-    if (specificDate) {
-      const date = new Date(specificDate);
-      dayValue = date.getDay(); // 0 = Zondag, 1 = Maandag, etc.
-    } else if (lesson.day_of_week !== undefined && lesson.day_of_week !== null) {
+    // Voor lessen met een specifieke datum, gebruik de opgeslagen day_of_week
+    // Bereken NIET de dag uit de datum, want dat overschrijft de originele dag
+    let dayValue = 1; // Default to Monday (1)
+    
+    if (lesson.day_of_week !== undefined && lesson.day_of_week !== null) {
       dayValue = parseInt(lesson.day_of_week);
     } else if (lesson.day !== undefined && lesson.day !== null) {
       dayValue = parseInt(lesson.day);
-    } else {
-      dayValue = 0; // Default to Sunday (0)
+    } else if (specificDate) {
+      // Alleen als er geen day_of_week is opgeslagen, bereken dan uit de datum
+      const date = new Date(specificDate);
+      const jsDay = date.getDay(); // 0 = Zondag, 1 = Maandag, etc.
+      dayValue = jsDay === 0 ? 7 : jsDay; // Converteer naar 1-7 systeem (Maandag=1, Zondag=7)
     }
     
-    // Zorg ervoor dat dayValue altijd een geldige waarde heeft (0-6)
-    if (isNaN(dayValue) || dayValue < 0 || dayValue > 6) {
-      dayValue = 0; // Default to Sunday (0)
+    // Zorg ervoor dat dayValue altijd een geldige waarde heeft (1-7)
+    if (isNaN(dayValue) || dayValue < 1 || dayValue > 7) {
+      dayValue = 1; // Default to Monday (1)
     }
     
     const result = {
@@ -611,7 +547,7 @@ class ApiService {
       time: lesson.time,
       trainer: lesson.trainer,
       spots: parseInt(lesson.spots) || 15,
-      day: dayValue,
+      day: dayValue, // Gebruik de opgeslagen dag van de week
       date: specificDate,
       specific_date: specificDate, // Voor compatibiliteit met oudere code
       description: lesson.description || '',
@@ -619,6 +555,12 @@ class ApiService {
       price: lesson.price || 0,
       image: lesson.image || 'Een generieke fitness les'
     };
+    
+    console.log('🔄 ApiService: Formatting lesson for frontend:', {
+      original: lesson,
+      formatted: result
+    });
+    console.log('Formatted for frontend:', result);
     
     return result;
   }

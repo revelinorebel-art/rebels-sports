@@ -263,13 +263,39 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Render de lessen voor de geselecteerde dag
+    // Render de lessen voor de geselecteerde dag (alleen specifieke datums)
     function renderClasses() {
         const classesList = document.getElementById('class-list');
         classesList.innerHTML = '';
         
         const classes = getClasses();
-        const filteredClasses = classes.filter(c => c.day === selectedDay);
+        
+        // Bereken de geselecteerde datum
+        const selectedDate = new Date(currentDate);
+        const startOfWeek = new Date(selectedDate);
+        const dayOfWeek = selectedDate.getDay();
+        const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        startOfWeek.setDate(selectedDate.getDate() + diff);
+        
+        const targetDate = new Date(startOfWeek);
+        targetDate.setDate(startOfWeek.getDate() + (selectedDay - 1));
+        const dateString = targetDate.toISOString().split('T')[0];
+        
+        // Filter ALLEEN lessen met specifieke datum die overeenkomt met de geselecteerde datum
+        const filteredClasses = classes.filter(c => {
+            // Controleer of de les een specifieke datum heeft die overeenkomt met de geselecteerde datum
+            if (c.specific_date === dateString || c.date === dateString) {
+                return true;
+            }
+            // Als de les een specific_date heeft, controleer of de datum op de juiste dag valt
+            if (c.specific_date || c.date) {
+                const lessonDate = new Date(c.specific_date || c.date);
+                const lessonDayOfWeek = lessonDate.getDay();
+                const adjustedDay = lessonDayOfWeek === 0 ? 7 : lessonDayOfWeek; // Zondag = 7 in plaats van 0
+                return adjustedDay === selectedDay && (c.specific_date === dateString || c.date === dateString);
+            }
+            return false;
+        });
         
         if (filteredClasses.length === 0) {
             classesList.innerHTML = '<div class="text-center py-10 text-gray-500">Geen lessen gevonden voor deze dag</div>';

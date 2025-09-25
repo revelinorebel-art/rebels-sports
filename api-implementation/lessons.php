@@ -6,6 +6,100 @@
 
 require_once 'config.php';
 
+// Quick debug test
+if (isset($_GET['quicktest'])) {
+    header('Content-Type: application/json');
+    echo json_encode([
+        'message' => 'Quick test working',
+        'get_params' => $_GET,
+        'request_uri' => $_SERVER['REQUEST_URI'] ?? 'not set',
+        'query_string' => $_SERVER['QUERY_STRING'] ?? 'not set'
+    ]);
+    exit();
+}
+
+// Simple HTML debug mode - MUST be first
+if (isset($_GET['htmldebug']) || isset($_GET['dbtest'])) {
+    // Clear any output buffers
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+    
+    // Set HTML content type
+    header('Content-Type: text/html; charset=utf-8');
+    
+    echo "<!DOCTYPE html><html><head><title>Database Debug</title></head><body>";
+    echo "<h2>Database Structure Debug</h2>";
+    echo "<p>Debug parameters: " . print_r($_GET, true) . "</p>";
+    
+    try {
+        echo "<h3>Table Structure:</h3>";
+        $stmt = $pdo->query("DESCRIBE lessons");
+        $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        echo "<pre>" . print_r($columns, true) . "</pre>";
+        
+        echo "<h3>Raw Data (last 3):</h3>";
+        $stmt = $pdo->query("SELECT * FROM lessons ORDER BY created_at DESC LIMIT 3");
+        $lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        echo "<pre>" . print_r($lessons, true) . "</pre>";
+        
+        echo "<h3>Column Names:</h3>";
+        $columnNames = array_column($columns, 'Field');
+        echo "<pre>" . print_r($columnNames, true) . "</pre>";
+        
+        echo "<h3>Specific Date Check:</h3>";
+        if (in_array('specific_date', $columnNames)) {
+            echo "<p style='color: green;'>✓ specific_date column EXISTS</p>";
+        } else {
+            echo "<p style='color: red;'>✗ specific_date column MISSING</p>";
+        }
+        
+    } catch (PDOException $e) {
+        echo "<p style='color: red;'>Error: " . $e->getMessage() . "</p>";
+    }
+    
+    echo "</body></html>";
+    die(); // Force exit
+}
+
+// Set CORS headers
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Content-Type: application/json');
+
+// Handle preflight requests
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
+
+// Debug endpoint to check database structure and content
+if (isset($_GET['debug'])) {
+    header('Content-Type: application/json');
+    try {
+        if ($_GET['debug'] === 'structure') {
+            $stmt = $pdo->query("DESCRIBE lessons");
+            $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            echo json_encode(['columns' => $columns]);
+            exit;
+        } elseif ($_GET['debug'] === 'raw') {
+            $stmt = $pdo->query("SELECT * FROM lessons ORDER BY created_at DESC LIMIT 3");
+            $lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            echo json_encode(['raw_lessons' => $lessons]);
+            exit;
+        } elseif ($_GET['debug'] === 'sql') {
+            $stmt = $pdo->query("SELECT id, title, specific_date, day_of_week FROM lessons ORDER BY created_at DESC LIMIT 3");
+            $lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            echo json_encode(['sql_result' => $lessons]);
+            exit;
+        }
+    } catch (PDOException $e) {
+        echo json_encode(['error' => $e->getMessage()]);
+        exit;
+    }
+}
+
 $method = $_SERVER['REQUEST_METHOD'];
 $input = json_decode(file_get_contents('php://input'), true);
 
@@ -34,35 +128,51 @@ function handleGetLessons() {
     global $pdo;
     
     try {
-        // Haal alle lessen op, gesorteerd op datum en tijd
-        $stmt = $pdo->query("
-            SELECT 
-                id,
-                title,
-                time,
-                trainer,
-                spots,
-                day_of_week as day,
-                specific_date as date,
-                description,
-                created_at,
-                updated_at
-            FROM lessons 
-            ORDER BY specific_date, time
-        ");
+        // Check database structure first
+        $stmt = $pdo->query("DESCRIBE lessons");
+        $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $columnNames = array_column($columns, 'Field');
         
-        $lessons = $stmt->fetchAll();
-        
-        // Converteer time format voor frontend compatibiliteit
-        foreach ($lessons as &$lesson) {
-            $lesson['time'] = substr($lesson['time'], 0, 5); // HH:MM format
-            $lesson['day'] = $lesson['day'] !== null ? (int)$lesson['day'] : null; // Zorg voor integer of null
-            $lesson['spots'] = (int)$lesson['spots'];
+        // Check if specific_date column exists
+        if (!in_array('specific_date', $columnNames)) {
+            $pdo->exec("ALTER TABLE lessons ADD COLUMN specific_date DATE NULL COMMENT 'Voor specifieke datum lessen'");
+            error_log("Added specific_date column to lessons table");
         }
         
-        sendResponse($lessons);
+        $stmt = $pdo->prepare("SELECT * FROM lessons ORDER BY specific_date ASC, time ASC");
+        $stmt->execute();
+        $lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Convert time format for frontend and ensure proper data types
+        foreach ($lessons as &$lesson) {
+            if ($lesson['time']) {
+                $lesson['time'] = date('H:i', strtotime($lesson['time']));
+            }
+            
+            // Ensure numeric fields are properly typed
+            $lesson['spots'] = (int)$lesson['spots'];
+            $lesson['day_of_week'] = $lesson['day_of_week'] ? (int)$lesson['day_of_week'] : null;
+            
+            // Ensure description is not null
+            $lesson['description'] = $lesson['description'] ?: '';
+        }
+        
+        error_log("GET LESSONS DEBUG: Found " . count($lessons) . " lessons");
+        error_log("GET LESSONS DEBUG: Lessons data: " . json_encode($lessons));
+        
+        sendResponse([
+            'success' => true, 
+            'data' => $lessons,  // Use 'data' for consistency with frontend expectations
+            'lessons' => $lessons, // Keep 'lessons' for backward compatibility
+            'count' => count($lessons),
+            'debug' => [
+                'table_structure' => $columnNames,
+                'specific_date_column_exists' => in_array('specific_date', $columnNames)
+            ]
+        ]);
         
     } catch (PDOException $e) {
+        error_log("Database error in handleGetLessons: " . $e->getMessage());
         sendError('Fout bij ophalen lessen: ' . $e->getMessage(), 500);
     }
 }
@@ -70,10 +180,25 @@ function handleGetLessons() {
 function handleCreateLesson($data) {
     global $pdo;
     
+    // Debug logging
+    error_log("CREATE LESSON DEBUG: Received data: " . json_encode($data));
+    
     // Valideer input (day is nu optioneel - alleen admin kan specifieke datum instellen)
     validateInput($data, ['title', 'time', 'trainer', 'spots']);
     
     try {
+        // Check database structure first
+        $stmt = $pdo->query("DESCRIBE lessons");
+        $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $columnNames = array_column($columns, 'Field');
+        error_log("Current table columns: " . json_encode($columnNames));
+        
+        // Check if specific_date column exists
+        if (!in_array('specific_date', $columnNames)) {
+            $pdo->exec("ALTER TABLE lessons ADD COLUMN specific_date DATE NULL COMMENT 'Voor specifieke datum lessen'");
+            error_log("Added specific_date column to lessons table");
+        }
+        
         // Genereer een unieke UUID voor de les
         $lessonId = generateUUID();
         
@@ -82,24 +207,46 @@ function handleCreateLesson($data) {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ");
         
-        $result = $stmt->execute([
+        $dayOfWeek = isset($data['day_of_week']) ? (int)$data['day_of_week'] : null;
+        $specificDate = isset($data['specific_date']) && !empty($data['specific_date']) ? $data['specific_date'] : null;
+        
+        error_log("CREATE LESSON DEBUG: day_of_week = " . var_export($dayOfWeek, true));
+        error_log("CREATE LESSON DEBUG: specific_date = " . var_export($specificDate, true));
+        
+        $params = [
             $lessonId,
             sanitizeInput($data['title']),
             $data['time'],
             sanitizeInput($data['trainer']),
             (int)$data['spots'],
-            isset($data['day']) ? (int)$data['day'] : null,
-            isset($data['date']) && !empty($data['date']) ? $data['date'] : null,
+            $dayOfWeek,
+            $specificDate,
             isset($data['description']) ? sanitizeInput($data['description']) : ''
-        ]);
+        ];
+        
+        error_log("SQL parameters: " . json_encode($params));
+        
+        $result = $stmt->execute($params);
         
         if ($result) {
-            sendResponse(['success' => true, 'id' => $lessonId, 'message' => 'Les succesvol toegevoegd']);
+            // Verify what was actually inserted
+            $verifyStmt = $pdo->prepare("SELECT id, title, specific_date, day_of_week FROM lessons WHERE id = ?");
+            $verifyStmt->execute([$lessonId]);
+            $insertedLesson = $verifyStmt->fetch(PDO::FETCH_ASSOC);
+            error_log("Inserted lesson verification: " . json_encode($insertedLesson));
+            
+            sendResponse([
+                'success' => true, 
+                'id' => $lessonId, 
+                'message' => 'Les succesvol toegevoegd',
+                'debug_inserted' => $insertedLesson
+            ]);
         } else {
             sendError('Fout bij toevoegen les', 500);
         }
         
     } catch (PDOException $e) {
+        error_log("Database error in handleCreateLesson: " . $e->getMessage());
         if ($e->getCode() == 23000) { // Duplicate entry
             sendError('Les met dit ID bestaat al', 409);
         } else {
@@ -126,8 +273,8 @@ function handleUpdateLesson($data) {
             $data['time'],
             sanitizeInput($data['trainer']),
             (int)$data['spots'],
-            isset($data['day']) ? (int)$data['day'] : null,
-            isset($data['date']) && !empty($data['date']) ? $data['date'] : null,
+            isset($data['day_of_week']) ? (int)$data['day_of_week'] : null,
+            isset($data['specific_date']) && !empty($data['specific_date']) ? $data['specific_date'] : null,
             isset($data['description']) ? sanitizeInput($data['description']) : '',
             sanitizeInput($data['id'])
         ]);

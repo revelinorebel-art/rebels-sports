@@ -25,6 +25,11 @@ Header always set Referrer-Policy "strict-origin-when-cross-origin"
     Deny from all
 </Files>
 
+<Files "db-config.php">
+    Order allow,deny
+    Deny from all
+</Files>
+
 <Files "database-setup.sql">
     Order allow,deny
     Deny from all

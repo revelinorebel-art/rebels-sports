@@ -43,7 +43,7 @@ function handleGetReservations() {
                     l.trainer as lesson_trainer
                 FROM reservations r
                 JOIN lessons l ON r.lesson_id = l.id
-                WHERE r.lesson_id = ? AND r.lesson_date = ? AND r.status = 'confirmed'
+                WHERE r.lesson_id = ? AND r.lesson_date = ?
                 ORDER BY r.created_at
             ");
             $stmt->execute([$lessonId, $date]);
@@ -53,7 +53,7 @@ function handleGetReservations() {
             $stmt = $pdo->prepare("
                 SELECT COUNT(*) as count 
                 FROM reservations 
-                WHERE lesson_id = ? AND lesson_date = ? AND status = 'confirmed'
+                WHERE lesson_id = ? AND lesson_date = ?
             ");
             $stmt->execute([$lessonId, $date]);
             $count = $stmt->fetch()['count'];
@@ -74,7 +74,7 @@ function handleGetReservations() {
                     l.day_of_week
                 FROM reservations r
                 JOIN lessons l ON r.lesson_id = l.id
-                WHERE r.status = 'confirmed'
+                WHERE 1=1
                 ORDER BY r.lesson_date DESC, l.time
             ");
             $reservations = $stmt->fetchAll();
@@ -107,7 +107,7 @@ function handleCreateReservation($data) {
         $stmt = $pdo->prepare("
             SELECT COUNT(*) as count 
             FROM reservations 
-            WHERE lesson_id = ? AND lesson_date = ? AND status = 'confirmed'
+            WHERE lesson_id = ? AND lesson_date = ?
         ");
         $stmt->execute([sanitizeInput($data['lesson_id']), $data['lesson_date']]);
         $currentReservations = $stmt->fetch()['count'];
@@ -119,7 +119,7 @@ function handleCreateReservation($data) {
         // Check of deze persoon al is ingeschreven
         $stmt = $pdo->prepare("
             SELECT id FROM reservations 
-            WHERE lesson_id = ? AND lesson_date = ? AND participant_email = ? AND status = 'confirmed'
+            WHERE lesson_id = ? AND lesson_date = ? AND participant_email = ?
         ");
         $stmt->execute([
             sanitizeInput($data['lesson_id']), 
@@ -232,7 +232,7 @@ function handleGetStats() {
             FROM reservations 
             WHERE MONTH(lesson_date) = MONTH(CURRENT_DATE()) 
             AND YEAR(lesson_date) = YEAR(CURRENT_DATE())
-            AND status = 'confirmed'
+
         ");
         $thisMonth = $stmt->fetch()['total_this_month'];
         
@@ -243,7 +243,7 @@ function handleGetStats() {
                 l.trainer,
                 COUNT(r.id) as reservation_count
             FROM lessons l
-            LEFT JOIN reservations r ON l.id = r.lesson_id AND r.status = 'confirmed'
+            LEFT JOIN reservations r ON l.id = r.lesson_id
             GROUP BY l.id, l.title, l.trainer
             ORDER BY reservation_count DESC
             LIMIT 5
